@@ -1,0 +1,42 @@
+{% extends "layout.html" %}
+{% block content %}
+<!-- Progress bar -->
+<div class="mb-4">
+    <div class="d-flex justify-content-between mb-1">
+        <small class="text-muted">Step {% if session.get('nstt_enabled') %}5{% else %}4{% endif %} of 5</small>
+        <small class="text-muted">Carryover</small>
+    </div>
+    <div class="progress">
+        {% if session.get('nstt_enabled') %}
+        <div class="progress-bar" role="progressbar" style="width: 80%" aria-valuenow="80" aria-valuemin="0" aria-valuemax="100"></div>
+        {% else %}
+        <div class="progress-bar" role="progressbar" style="width: 80%" aria-valuenow="80" aria-valuemin="0" aria-valuemax="100"></div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card shadow-sm mb-4">
+    <div class="card-body">
+        <h2 class="card-title mb-3"><i class="fa-solid fa-clipboard-list me-1"></i> Carryover from Previous Month</h2>
+        <p class="text-muted">If any NSFs have outstanding bad deals (Fri/Sat/3‑boarding Ops) from last month, enter the carryover values here. Otherwise leave blank.</p>
+        <form action="{{ url_for('carry') }}" method="post">
+            <div class="mb-3">
+                <label for="carryover" class="form-label">Carryover values (Name:Number)</label>
+                <div class="input-group">
+                    <span class="input-group-text"><i class="fa-solid fa-layer-group"></i></span>
+                    <input type="text" class="form-control" id="carryover" name="carryover" placeholder="Andre:2, Skyler:1">
+                </div>
+                <div class="form-text">Example: Andre:2, Skyler:1. Leave blank if none.</div>
+            </div>
+            <div class="d-flex justify-content-between">
+                {% if session.get('nstt_enabled') %}
+                <a href="{{ url_for('nstt') }}" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Back</a>
+                {% else %}
+                <a href="{{ url_for('leaders') }}" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Back</a>
+                {% endif %}
+                <button type="submit" class="btn btn-success"><i class="fa-solid fa-check me-1"></i>Compute Schedule</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
