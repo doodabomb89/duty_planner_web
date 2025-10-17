@@ -1,0 +1,111 @@
+/* Custom styles to enhance the look and feel of the Ops Planner web app */
+
+/* Base theme colours and fonts */
+:root {
+    /* Primary and accent colours used throughout the interface */
+    --primary-color: #20c997; /* teal */
+    --accent-color: #5e60ce; /* soft purple */
+    --bg-light: #f5f6fa;
+    --text-dark: #212529;
+}
+
+/* Global font settings */
+body {
+    background-color: var(--bg-light);
+    font-family: 'Open Sans', sans-serif;
+    color: var(--text-dark);
+}
+
+/* Headings use a friendly display font */
+h1, h2, h3, h4, h5, h6 {
+    font-family: 'Poppins', sans-serif;
+    font-weight: 600;
+}
+
+/* Elevate cards with subtle rounding and remove harsh borders */
+.card {
+    border: none;
+    border-radius: 0.75rem;
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.05);
+    background-color: #fff;
+}
+
+/* Enhance navbar branding */
+.navbar-brand span {
+    font-weight: 600;
+    font-size: 1.25rem;
+}
+
+/* Adjust table cell alignment and font */
+.table-custom th,
+.table-custom td {
+    vertical-align: middle;
+    font-size: 0.9rem;
+}
+
+/* Style progress bars for smoother animation */
+.progress-bar {
+    transition: width 0.4s ease;
+}
+
+/* Nav tabs styling */
+.nav-tabs .nav-link {
+    border-radius: 0.5rem 0.5rem 0 0;
+    margin-right: 0.25rem;
+    color: var(--primary-color);
+    font-weight: 500;
+}
+.nav-tabs .nav-link.active {
+    background-image: linear-gradient(to right, var(--primary-color), var(--accent-color));
+    color: #fff;
+    border-color: transparent;
+}
+
+/* Highlight bad-deal days */
+.bad-day {
+    font-weight: 600;
+    color: #d9534f;
+}
+
+/* Reduce spacing in table cells for compactness */
+.table-custom td,
+.table-custom th {
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+}
+
+/* Navbar gradient */
+.navbar.bg-primary {
+    background-image: linear-gradient(to right, var(--primary-color), var(--accent-color));
+    border: none;
+}
+
+/* Buttons with gradient backgrounds */
+.btn-success {
+    background-image: linear-gradient(to right, var(--primary-color), var(--accent-color));
+    border: none;
+}
+.btn-success:hover {
+    opacity: 0.95;
+}
+
+.btn-outline-secondary {
+    color: var(--primary-color);
+    border-color: var(--primary-color);
+}
+.btn-outline-secondary:hover {
+    background-color: var(--primary-color);
+    color: #fff;
+    border-color: var(--primary-color);
+}
+
+/* Progress bar gradient */
+.progress-bar {
+    background-image: linear-gradient(to right, var(--primary-color), var(--accent-color));
+}
+
+/* Table header styling */
+thead.table-dark th {
+    background-image: linear-gradient(to right, var(--primary-color), var(--accent-color));
+    border-color: transparent;
+}
