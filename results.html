@@ -1,0 +1,150 @@
+{% extends "layout.html" %}
+{% block content %}
+<div class="mb-4">
+    <h2><i class="fa-solid fa-chart-bar me-2"></i>Results Overview</h2>
+    <p class="text-muted">Use the tabs below to switch between the different views of your Ops plan.</p>
+</div>
+
+<ul class="nav nav-tabs mb-3" id="resultTab" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="ops-tab" data-bs-toggle="tab" data-bs-target="#ops-pane" type="button" role="tab" aria-controls="ops-pane" aria-selected="true">
+            <i class="fa-solid fa-people-group me-1"></i>Ops Schedule
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="standby-tab" data-bs-toggle="tab" data-bs-target="#standby-pane" type="button" role="tab" aria-controls="standby-pane" aria-selected="false">
+            <i class="fa-solid fa-bed me-1"></i>Standby Schedule
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="nsf-tab" data-bs-toggle="tab" data-bs-target="#nsf-pane" type="button" role="tab" aria-controls="nsf-pane" aria-selected="false">
+            <i class="fa-solid fa-user-check me-1"></i>NSF Summary
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="leader-tab" data-bs-toggle="tab" data-bs-target="#leader-pane" type="button" role="tab" aria-controls="leader-pane" aria-selected="false">
+            <i class="fa-solid fa-users-gear me-1"></i>Leader Summary
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content" id="resultTabContent">
+    <!-- Ops Schedule Pane -->
+    <div class="tab-pane fade show active" id="ops-pane" role="tabpanel" aria-labelledby="ops-tab">
+        <div class="table-responsive">
+            <table class="table table-bordered table-hover table-custom">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Ops date (day)</th>
+                        <th>TL</th>
+                        <th>ATL</th>
+                        <th>C2</th>
+                        <th>NSFs</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in ops_rows %}
+                    {% set bad = row[0].startswith('*') %}
+                    <tr class="{% if bad %}table-danger{% endif %}">
+                        {% if bad %}
+                        <td><span class="bad-day">{{ row[0][1:] }}</span> <span class="badge bg-danger ms-1">bad‑deal</span></td>
+                        {% else %}
+                        <td>{{ row[0] }}</td>
+                        {% endif %}
+                        <td>{{ row[1] }}</td>
+                        <td>{{ row[2] }}</td>
+                        <td>{{ row[3] }}</td>
+                        <td>{{ row[4] }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <!-- Standby Schedule Pane -->
+    <div class="tab-pane fade" id="standby-pane" role="tabpanel" aria-labelledby="standby-tab">
+        <div class="table-responsive">
+            <table class="table table-bordered table-striped table-custom">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Standby date (day)</th>
+                        <th>TL</th>
+                        <th>ATL</th>
+                        <th>C2</th>
+                        <th>NSFs</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in standby_rows %}
+                    <tr>
+                        <td>{{ row[0] }}</td>
+                        <td>{{ row[1] }}</td>
+                        <td>{{ row[2] }}</td>
+                        <td>{{ row[3] }}</td>
+                        <td>{{ row[4] }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <!-- NSF Summary Pane -->
+    <div class="tab-pane fade" id="nsf-pane" role="tabpanel" aria-labelledby="nsf-tab">
+        <div class="table-responsive">
+            <table class="table table-bordered table-striped table-custom">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Name</th>
+                        <th>Total Ops</th>
+                        <th>Fri/Sat/3 boardings Ops</th>
+                        <th>Carryover</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in nsf_summary_rows %}
+                    <tr>
+                        <td>{{ row[0] }}</td>
+                        <td>{{ row[1] }}</td>
+                        <td>{{ row[2] }}</td>
+                        <td>{{ row[3] }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <!-- Leader Summary Pane -->
+    <div class="tab-pane fade" id="leader-pane" role="tabpanel" aria-labelledby="leader-tab">
+        {% if leader_summary_rows %}
+        <div class="table-responsive">
+            <table class="table table-bordered table-striped table-custom">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Name</th>
+                        <th>Role</th>
+                        <th>Total Ops</th>
+                        <th>Fri/Sat/3 boardings Ops</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in leader_summary_rows %}
+                    <tr {% if row[0] == '' %}class="spacer-row"{% endif %}>
+                        <td>{{ row[0] }}</td>
+                        <td>{{ row[1] }}</td>
+                        <td>{{ row[2] }}</td>
+                        <td>{{ row[3] }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="mt-3">No leaders data recorded.</p>
+        {% endif %}
+    </div>
+</div>
+
+<div class="mt-4">
+    <a href="{{ url_for('reset') }}" class="btn btn-secondary"><i class="fa-solid fa-rotate-left me-1"></i>Start Over</a>
+</div>
+{% endblock %}
