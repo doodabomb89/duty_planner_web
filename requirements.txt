@@ -1,0 +1,6 @@
+flask
+
+# This additional dependency is required for production deployment with WSGI
+# servers such as gunicorn. It will not alter your application logic but
+# allows the host platform to serve your Flask app efficiently.
+gunicorn==21.2.0
