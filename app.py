@@ -876,6 +876,11 @@ def carry():
 def results():
     """Compute the schedule and render results tables."""
     # reconstruct objects from session
+    required = ["start_date", "end_date", "anchor_date", "roster", "leaders"]
+    missing = [k for k in required if k not in session]
+    if missing:
+        flash("Setup incomplete. Please start again.")
+        return redirect(url_for("index"))
     start_date = parse_yyyy_mm_dd(session["start_date"])
     end_date = parse_yyyy_mm_dd(session["end_date"])
     anchor_date = parse_yyyy_mm_dd(session["anchor_date"])
