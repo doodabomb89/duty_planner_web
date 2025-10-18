@@ -170,5 +170,32 @@
   </div>
 
 </div>
+{% block extra_scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  // Check if Bootstrap loaded correctly
+  try {
+    console.log('Bootstrap bundle present:', !!window.bootstrap);
+    if (window.bootstrap && bootstrap.Tooltip) {
+      console.log('Bootstrap version (from Tooltip):', bootstrap.Tooltip.VERSION);
+    }
+  } catch (e) { console.warn('Bootstrap check error:', e); }
+
+  // Force tab activation on click
+  const triggers = document.querySelectorAll('#resultsTabs [data-bs-toggle="tab"]');
+  triggers.forEach(btn => {
+    btn.addEventListener('click', function (e) {
+      e.preventDefault();
+      const tab = new bootstrap.Tab(this);
+      tab.show();
+    });
+  });
+
+  document.getElementById('resultsTabsContent')?.addEventListener('shown.bs.tab', (e) => {
+    console.log('Tab shown:', e.target?.id);
+  });
+});
+</script>
+{% endblock %}
 
 {% endblock %}
