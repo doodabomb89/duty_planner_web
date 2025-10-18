@@ -577,7 +577,7 @@ def build_tables(
         nsfs = team[3:] if len(team) > 3 else []
         nsf_str = ", ".join(nsfs) if nsfs else "—"
         standby_rows.append([day_str, tl or "—", atl or "—", c2 or "—", nsf_str])
-    # NSF summary
+        # NSF summary
     total_ops_count = len(all_ops)
     nsf_summary_rows: List[List[str]] = []
     for name in sorted(stats.keys(), key=str.lower):
@@ -590,29 +590,44 @@ def build_tables(
             str(bad),
             str(co),
         ])
-    # Leader summary
+
+    # Leader summary (compute from leaders_by_day instead of regs.stats_by_role)
     leader_summary_rows: List[List[str]] = []
     role_order = ["TL", "ATL", "C2"]
-    # Build a fresh copy of regs with aggregated stats; do not rely on stateful regs
-    # Provided regs may have mutated stats; ensure we compute groupings properly
-    # We'll flatten each role group, separated by blank line between groups
+
+    # aggregate per leader per role using leaders_by_day + bad_ops
+    leader_stats: Dict[str, Dict[str, Dict[str, int]]] = {}
+    for d in sorted(all_ops):
+        is_bad = d in bad_ops
+        leaders = leaders_by_day.get(d, {})
+        for role in role_order:
+            nm = leaders.get(role)
+            if not nm:
+                continue
+            leader_stats.setdefault(nm, {}).setdefault(role, {"total": 0, "bad": 0})
+            leader_stats[nm][role]["total"] += 1
+            if is_bad:
+                leader_stats[nm][role]["bad"] += 1
+
+    # Emit rows grouped by role, with a blank spacer between groups
     for role in role_order:
         role_rows: List[List[str]] = []
-        for r in regs:
-            st = r.stats_by_role.get(role)
-            if not st or st["total"] == 0:
+        for name, roles in leader_stats.items():
+            stats_for_role = roles.get(role)
+            if not stats_for_role:
                 continue
             role_rows.append([
-                r.name,
+                name,
                 role,
-                f"{st['total']}/{total_ops_count}",
-                str(st["bad"]),
+                f"{stats_for_role['total']}/{total_ops_count}",
+                str(stats_for_role["bad"]),
             ])
         role_rows.sort(key=lambda x: x[0].lower())
         if role_rows:
-            if leader_summary_rows:
-                leader_summary_rows.append(["", "", "", ""])  # spacer
+            if leader_summary_rows:  # spacer between role groups
+                leader_summary_rows.append(["", "", "", ""])
             leader_summary_rows.extend(role_rows)
+
     return {
         "ops_rows": ops_rows,
         "standby_rows": standby_rows,
