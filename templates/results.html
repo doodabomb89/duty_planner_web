@@ -44,24 +44,27 @@
           </tr>
         </thead>
         <tbody>
-          {# Expecting ops_rows as a list of dicts:
-             { "date_str": "01 oct (wed)", "is_bad": true/false, "tl": "...", "atl": "...", "c2": "...", "nsfs": "name, name" }
-             If your keys differ, just adjust the field names below. #}
-          {% for r in ops_rows %}
-          <tr>
-            <td>
-              {% if r.is_bad %}
-                <span class="badge-soft-warning">{{ r.date_str }}</span>
-              {% else %}
-                {{ r.date_str }}
-              {% endif %}
-            </td>
-            <td>{{ r.tl or "—" }}</td>
-            <td>{{ r.atl or "—" }}</td>
-            <td>{{ r.c2 or "—" }}</td>
-            <td>{{ r.nsfs or "—" }}</td>
-          </tr>
-          {% endfor %}
+          {% if ops_rows and ops_rows|length %}
+            {% for r in ops_rows %}
+              {# r is a list: [date_str, TL, ATL, C2, NSFs] #}
+              <tr>
+                <td>
+                  {% set day = r[0] %}
+                  {% if '*' in day %}
+                    <span class="badge rounded-pill text-bg-warning">{{ day|replace('*','') }}</span>
+                  {% else %}
+                    <span class="badge rounded-pill text-bg-light">{{ day }}</span>
+                  {% endif %}
+                </td>
+                <td>{{ r[1] or "—" }}</td>
+                <td>{{ r[2] or "—" }}</td>
+                <td>{{ r[3] or "—" }}</td>
+                <td>{{ r[4] or "—" }}</td>
+              </tr>
+            {% endfor %}
+          {% else %}
+            <tr><td colspan="5" class="text-muted">No rows to display.</td></tr>
+          {% endif %}
         </tbody>
       </table>
     </div>
@@ -81,17 +84,20 @@
           </tr>
         </thead>
         <tbody>
-          {# Expecting standby_rows like:
-             { "date_str": "30 sep (tue)", "tl": "...", "atl": "...", "c2": "...", "nsfs": "name, name" } #}
-          {% for r in standby_rows %}
-          <tr>
-            <td>{{ r.date_str }}</td>
-            <td>{{ r.tl or "—" }}</td>
-            <td>{{ r.atl or "—" }}</td>
-            <td>{{ r.c2 or "—" }}</td>
-            <td>{{ r.nsfs or "—" }}</td>
-          </tr>
-          {% endfor %}
+          {% if standby_rows and standby_rows|length %}
+            {% for r in standby_rows %}
+              {# r is a list: [date_str, TL, ATL, C2, NSFs] #}
+              <tr>
+                <td><span class="badge rounded-pill text-bg-light">{{ r[0] }}</span></td>
+                <td>{{ r[1] or "—" }}</td>
+                <td>{{ r[2] or "—" }}</td>
+                <td>{{ r[3] or "—" }}</td>
+                <td>{{ r[4] or "—" }}</td>
+              </tr>
+            {% endfor %}
+          {% else %}
+            <tr><td colspan="5" class="text-muted">No rows to display.</td></tr>
+          {% endif %}
         </tbody>
       </table>
     </div>
@@ -110,16 +116,19 @@
           </tr>
         </thead>
         <tbody>
-          {# Expecting nsf_summary_rows like:
-             { "name": "Andre", "total": "8/12", "bad": "3", "carry": "1" } #}
-          {% for r in nsf_summary_rows %}
-          <tr>
-            <td>{{ r.name }}</td>
-            <td>{{ r.total }}</td>
-            <td>{{ r.bad }}</td>
-            <td>{{ r.carry }}</td>
-          </tr>
-          {% endfor %}
+          {% if nsf_summary_rows and nsf_summary_rows|length %}
+            {% for r in nsf_summary_rows %}
+              {# r is a list: [name, total/total_ops_count, bad, carry] #}
+              <tr>
+                <td>{{ r[0] }}</td>
+                <td>{{ r[1] }}</td>
+                <td>{{ r[2] }}</td>
+                <td>{{ r[3] }}</td>
+              </tr>
+            {% endfor %}
+          {% else %}
+            <tr><td colspan="4" class="text-muted">No rows to display.</td></tr>
+          {% endif %}
         </tbody>
       </table>
     </div>
@@ -138,16 +147,23 @@
           </tr>
         </thead>
         <tbody>
-          {# Expecting leader_summary_rows like:
-             { "name": "Evan", "role": "ATL", "total": "5/12", "bad": "2" } #}
-          {% for r in leader_summary_rows %}
-          <tr>
-            <td>{{ r.name }}</td>
-            <td>{{ r.role }}</td>
-            <td>{{ r.total }}</td>
-            <td>{{ r.bad }}</td>
-          </tr>
-          {% endfor %}
+          {% if leader_summary_rows and leader_summary_rows|length %}
+            {% for r in leader_summary_rows %}
+              {# r is a list: [name, role, total/total_ops_count, bad] OR ["","","",""] spacer #}
+              {% if (not r[0]) and (not r[1]) and (not r[2]) and (not r[3]) %}
+                <tr class="spacer-row"><td colspan="4"></td></tr>
+              {% else %}
+                <tr>
+                  <td>{{ r[0] }}</td>
+                  <td>{{ r[1] }}</td>
+                  <td>{{ r[2] }}</td>
+                  <td>{{ r[3] }}</td>
+                </tr>
+              {% endif %}
+            {% endfor %}
+          {% else %}
+            <tr><td colspan="4" class="text-muted">No rows to display.</td></tr>
+          {% endif %}
         </tbody>
       </table>
     </div>
