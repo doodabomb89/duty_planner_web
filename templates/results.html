@@ -1,150 +1,158 @@
 {% extends "layout.html" %}
 {% block content %}
-<div class="mb-4">
-    <h2><i class="fa-solid fa-chart-bar me-2"></i>Results Overview</h2>
-    <p class="text-muted">Use the tabs below to switch between the different views of your Ops plan.</p>
-</div>
 
-<ul class="nav nav-tabs mb-3" id="resultTab" role="tablist">
-    <li class="nav-item" role="presentation">
-        <button class="nav-link active" id="ops-tab" data-bs-toggle="tab" data-bs-target="#ops-pane" type="button" role="tab" aria-controls="ops-pane" aria-selected="true">
-            <i class="fa-solid fa-people-group me-1"></i>Ops Schedule
-        </button>
-    </li>
-    <li class="nav-item" role="presentation">
-        <button class="nav-link" id="standby-tab" data-bs-toggle="tab" data-bs-target="#standby-pane" type="button" role="tab" aria-controls="standby-pane" aria-selected="false">
-            <i class="fa-solid fa-bed me-1"></i>Standby Schedule
-        </button>
-    </li>
-    <li class="nav-item" role="presentation">
-        <button class="nav-link" id="nsf-tab" data-bs-toggle="tab" data-bs-target="#nsf-pane" type="button" role="tab" aria-controls="nsf-pane" aria-selected="false">
-            <i class="fa-solid fa-user-check me-1"></i>NSF Summary
-        </button>
-    </li>
-    <li class="nav-item" role="presentation">
-        <button class="nav-link" id="leader-tab" data-bs-toggle="tab" data-bs-target="#leader-pane" type="button" role="tab" aria-controls="leader-pane" aria-selected="false">
-            <i class="fa-solid fa-users-gear me-1"></i>Leader Summary
-        </button>
-    </li>
+<h2 class="mb-2"><i class="fa-solid fa-chart-bar me-1"></i> Results Overview</h2>
+<p class="text-muted">Use the tabs below to switch between the different views of your Ops plan.</p>
+
+<!-- Tabs -->
+<ul class="nav nav-tabs mb-3" id="resultsTabs" role="tablist">
+  <li class="nav-item" role="presentation">
+    <button class="nav-link active" id="ops-tab" data-bs-toggle="tab" data-bs-target="#ops-pane" type="button" role="tab" aria-controls="ops-pane" aria-selected="true">
+      Ops Schedule
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="standby-tab" data-bs-toggle="tab" data-bs-target="#standby-pane" type="button" role="tab" aria-controls="standby-pane" aria-selected="false">
+      Standby Schedule
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="nsf-tab" data-bs-toggle="tab" data-bs-target="#nsf-pane" type="button" role="tab" aria-controls="nsf-pane" aria-selected="false">
+      NSF Summary
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="leader-tab" data-bs-toggle="tab" data-bs-target="#leader-pane" type="button" role="tab" aria-controls="leader-pane" aria-selected="false">
+      Leader Summary
+    </button>
+  </li>
 </ul>
 
-<div class="tab-content" id="resultTabContent">
-    <!-- Ops Schedule Pane -->
-    <div class="tab-pane fade show active" id="ops-pane" role="tabpanel" aria-labelledby="ops-tab">
-        <div class="table-responsive">
-            <table class="table table-bordered table-hover table-custom">
-                <thead class="table-dark">
-                    <tr>
-                        <th>Ops date (day)</th>
-                        <th>TL</th>
-                        <th>ATL</th>
-                        <th>C2</th>
-                        <th>NSFs</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for row in ops_rows %}
-                    {% set bad = row[0].startswith('*') %}
-                    <tr class="{% if bad %}table-danger{% endif %}">
-                        {% if bad %}
-                        <td><span class="bad-day">{{ row[0][1:] }}</span> <span class="badge bg-danger ms-1">bad‑deal</span></td>
-                        {% else %}
-                        <td>{{ row[0] }}</td>
-                        {% endif %}
-                        <td>{{ row[1] }}</td>
-                        <td>{{ row[2] }}</td>
-                        <td>{{ row[3] }}</td>
-                        <td>{{ row[4] }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+<div class="tab-content" id="resultsTabsContent">
+
+  <!-- OPS SCHEDULE -->
+  <div class="tab-pane fade show active" id="ops-pane" role="tabpanel" aria-labelledby="ops-tab" tabindex="0">
+    <div class="table-responsive">
+      <table class="table table-bordered table-hover table-custom">
+        <thead class="table-dark">
+          <tr>
+            <th class="gradient-th">Ops date (day)</th>
+            <th class="gradient-th">TL</th>
+            <th class="gradient-th">ATL</th>
+            <th class="gradient-th">C2</th>
+            <th class="gradient-th">NSFs</th>
+          </tr>
+        </thead>
+        <tbody>
+          {# Expecting ops_rows as a list of dicts:
+             { "date_str": "01 oct (wed)", "is_bad": true/false, "tl": "...", "atl": "...", "c2": "...", "nsfs": "name, name" }
+             If your keys differ, just adjust the field names below. #}
+          {% for r in ops_rows %}
+          <tr>
+            <td>
+              {% if r.is_bad %}
+                <span class="badge-soft-warning">{{ r.date_str }}</span>
+              {% else %}
+                {{ r.date_str }}
+              {% endif %}
+            </td>
+            <td>{{ r.tl or "—" }}</td>
+            <td>{{ r.atl or "—" }}</td>
+            <td>{{ r.c2 or "—" }}</td>
+            <td>{{ r.nsfs or "—" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
-    <!-- Standby Schedule Pane -->
-    <div class="tab-pane fade" id="standby-pane" role="tabpanel" aria-labelledby="standby-tab">
-        <div class="table-responsive">
-            <table class="table table-bordered table-striped table-custom">
-                <thead class="table-dark">
-                    <tr>
-                        <th>Standby date (day)</th>
-                        <th>TL</th>
-                        <th>ATL</th>
-                        <th>C2</th>
-                        <th>NSFs</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for row in standby_rows %}
-                    <tr>
-                        <td>{{ row[0] }}</td>
-                        <td>{{ row[1] }}</td>
-                        <td>{{ row[2] }}</td>
-                        <td>{{ row[3] }}</td>
-                        <td>{{ row[4] }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+  </div>
+
+  <!-- STANDBY -->
+  <div class="tab-pane fade" id="standby-pane" role="tabpanel" aria-labelledby="standby-tab" tabindex="0">
+    <div class="table-responsive">
+      <table class="table table-bordered table-hover table-custom">
+        <thead class="table-dark">
+          <tr>
+            <th class="gradient-th">Standby date (day)</th>
+            <th class="gradient-th">TL</th>
+            <th class="gradient-th">ATL</th>
+            <th class="gradient-th">C2</th>
+            <th class="gradient-th">NSFs</th>
+          </tr>
+        </thead>
+        <tbody>
+          {# Expecting standby_rows like:
+             { "date_str": "30 sep (tue)", "tl": "...", "atl": "...", "c2": "...", "nsfs": "name, name" } #}
+          {% for r in standby_rows %}
+          <tr>
+            <td>{{ r.date_str }}</td>
+            <td>{{ r.tl or "—" }}</td>
+            <td>{{ r.atl or "—" }}</td>
+            <td>{{ r.c2 or "—" }}</td>
+            <td>{{ r.nsfs or "—" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
-    <!-- NSF Summary Pane -->
-    <div class="tab-pane fade" id="nsf-pane" role="tabpanel" aria-labelledby="nsf-tab">
-        <div class="table-responsive">
-            <table class="table table-bordered table-striped table-custom">
-                <thead class="table-dark">
-                    <tr>
-                        <th>Name</th>
-                        <th>Total Ops</th>
-                        <th>Fri/Sat/3 boardings Ops</th>
-                        <th>Carryover</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for row in nsf_summary_rows %}
-                    <tr>
-                        <td>{{ row[0] }}</td>
-                        <td>{{ row[1] }}</td>
-                        <td>{{ row[2] }}</td>
-                        <td>{{ row[3] }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+  </div>
+
+  <!-- NSF SUMMARY -->
+  <div class="tab-pane fade" id="nsf-pane" role="tabpanel" aria-labelledby="nsf-tab" tabindex="0">
+    <div class="table-responsive">
+      <table class="table table-bordered table-hover table-custom">
+        <thead class="table-dark">
+          <tr>
+            <th class="gradient-th">Name</th>
+            <th class="gradient-th">Total Ops</th>
+            <th class="gradient-th">Fri/Sat/3-boardings Ops</th>
+            <th class="gradient-th">Carryover</th>
+          </tr>
+        </thead>
+        <tbody>
+          {# Expecting nsf_summary_rows like:
+             { "name": "Andre", "total": "8/12", "bad": "3", "carry": "1" } #}
+          {% for r in nsf_summary_rows %}
+          <tr>
+            <td>{{ r.name }}</td>
+            <td>{{ r.total }}</td>
+            <td>{{ r.bad }}</td>
+            <td>{{ r.carry }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
-    <!-- Leader Summary Pane -->
-    <div class="tab-pane fade" id="leader-pane" role="tabpanel" aria-labelledby="leader-tab">
-        {% if leader_summary_rows %}
-        <div class="table-responsive">
-            <table class="table table-bordered table-striped table-custom">
-                <thead class="table-dark">
-                    <tr>
-                        <th>Name</th>
-                        <th>Role</th>
-                        <th>Total Ops</th>
-                        <th>Fri/Sat/3 boardings Ops</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for row in leader_summary_rows %}
-                    <tr {% if row[0] == '' %}class="spacer-row"{% endif %}>
-                        <td>{{ row[0] }}</td>
-                        <td>{{ row[1] }}</td>
-                        <td>{{ row[2] }}</td>
-                        <td>{{ row[3] }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% else %}
-        <p class="mt-3">No leaders data recorded.</p>
-        {% endif %}
+  </div>
+
+  <!-- LEADER SUMMARY -->
+  <div class="tab-pane fade" id="leader-pane" role="tabpanel" aria-labelledby="leader-tab" tabindex="0">
+    <div class="table-responsive">
+      <table class="table table-bordered table-hover table-custom">
+        <thead class="table-dark">
+          <tr>
+            <th class="gradient-th">Name</th>
+            <th class="gradient-th">Role</th>
+            <th class="gradient-th">Total Ops</th>
+            <th class="gradient-th">Fri/Sat/3-boardings Ops</th>
+          </tr>
+        </thead>
+        <tbody>
+          {# Expecting leader_summary_rows like:
+             { "name": "Evan", "role": "ATL", "total": "5/12", "bad": "2" } #}
+          {% for r in leader_summary_rows %}
+          <tr>
+            <td>{{ r.name }}</td>
+            <td>{{ r.role }}</td>
+            <td>{{ r.total }}</td>
+            <td>{{ r.bad }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
+  </div>
+
 </div>
 
-<div class="mt-4">
-    <a href="{{ url_for('reset') }}" class="btn btn-secondary"><i class="fa-solid fa-rotate-left me-1"></i>Start Over</a>
-</div>
 {% endblock %}
