@@ -188,16 +188,25 @@ def plan_leaders_for_ops(all_ops: List[date], regs: List[Regular], bad_ops: Set[
         return st["TL"]["total"] + st["ATL"]["total"] + st["C2"]["total"]
 
     def _reg_key_for_role_balanced(r: Regular, role: str, is_bad: bool):
-        overall_tot = _leader_overall_total(r)
-        role_st = r.stats_by_role.get(role, {"total": 0, "bad": 0})
-        role_bad = role_st["bad"]
-        role_tot = role_st["total"]
-        return (
-            overall_tot,
-            (role_bad if is_bad else 0),
-            role_tot,
-            r.name.lower(),
-        )
+    """
+    On bad days, balance the bad-deal load within the role first.
+    Then balance within-role totals, then overall totals, then name.
+
+    On normal days, keep overall balance first (as before), then within-role totals.
+    """
+    st = r.stats_by_role
+    overall_tot = st["TL"]["total"] + st["ATL"]["total"] + st["C2"]["total"]
+    role_st = st.get(role, {"total": 0, "bad": 0})
+    role_bad = role_st["bad"]
+    role_tot = role_st["total"]
+
+    if is_bad:
+        # Fair bad-day sharing first
+        return (role_bad, role_tot, overall_tot, r.name.lower())
+    else:
+        # Keep even overall distribution on normal days
+        return (overall_tot, role_tot, r.name.lower())
+
 
     by_day: Dict[date, Dict[str, Optional[str]]] = {}
     for d in sorted(all_ops):
