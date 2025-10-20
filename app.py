@@ -697,6 +697,149 @@ def plan_standby_with_leaders(
         standby[sday] = picks + nsf_picks
 
     return standby
+  
+from copy import deepcopy
+
+def rebuild_nstt_tags_for_completion(
+    all_ops: List[date],
+    nsf_schedule: Dict[date, List[str]],
+    nstt_cfg: NSTTConfig,
+) -> Dict[date, Dict[str, str]]:
+    """
+    Re-assign NSTT tags *after* the NSF schedule is known, to maximize
+    the number of people who can FINISH their NSTT within the month.
+
+    Rules kept:
+      - At most 2 NSTT people per Op day.
+      - 'O' before 'E' before 'A' per track, and within a day at most ONE non-O per boarding.
+      - Respect individual start dates and availability (implied by NSF team that day).
+      - Prefer candidates who CANNOT finish this month if they skip today.
+      - Then prefer higher 'urgency': stages_left / future_scheduled_ops_left.
+      - Then prefer earlier stage (O < E < A), then lower workload.
+    """
+    if not nstt_cfg.enabled:
+        return {}
+
+    # fresh, independent copy so we can mutate remaining stages cleanly
+    members = deepcopy(nstt_cfg.members)
+
+    # Precompute: for each person, list of *scheduled* Ops from today on
+    scheduled_ops_by_person: Dict[str, List[date]] = {}
+    for d in sorted(all_ops):
+        team = nsf_schedule.get(d, [])
+        for nm in team:
+            scheduled_ops_by_person.setdefault(nm, []).append(d)
+
+    def next_need(nm: str) -> Optional[Tuple[str, str]]:
+        m = members.get(nm)
+        if not m:
+            return None
+        # honor declared types; stage order is the remaining list head
+        for track in ("C2", "E1"):
+            if track in m.types and m.remaining.get(track):
+                return (track, m.remaining[track][0])
+        return None
+
+    def future_scheduled_left(nm: str, today: date) -> int:
+        # count how many *scheduled* ops (>= today) the person still has
+        arr = scheduled_ops_by_person.get(nm, [])
+        return sum(1 for dd in arr if dd >= today)
+
+    # assign tags day-by-day with a global awareness of "finishability"
+    out_tags: Dict[date, Dict[str, str]] = {}
+
+    for d in sorted(all_ops):
+        team = nsf_schedule.get(d, [])
+        if not team:
+            continue
+
+        # how many boardings today?
+        if d in nstt_cfg.no_boarding_ops:
+            num_boardings = 0
+        elif d in nstt_cfg.three_boarding_ops:
+            num_boardings = 3
+        else:
+            # Sun=1, others=2
+            num_boardings = 1 if d.weekday() == 6 else 2
+
+        if num_boardings <= 0:
+            continue
+
+        # candidates = team members who can start and still need something
+        def can_start(nm: str) -> bool:
+            m = members.get(nm)
+            if not m:
+                return False
+            start = m.start_date or nstt_cfg.global_start
+            return (start is None) or (d >= start)
+
+        cands = [nm for nm in team if can_start(nm) and next_need(nm) is not None]
+        if not cands:
+            continue
+
+        # rank candidates with a finishability-first sort key
+        def cand_key(nm: str):
+            need = next_need(nm)         # (track, stage)
+            if not need:
+                # put at the very end
+                return (1, 999.0, 999, nm.lower())
+            track, stage = need
+            m = members[nm]
+            stages_left = len(m.remaining.get(track, []))
+            chances_left = future_scheduled_left(nm, d)
+            # if skipping TODAY means they cannot finish this month:
+            # i.e., remaining scheduled ops < remaining stages
+            must_today = 0 if chances_left < stages_left else 1
+            # urgency: fewer chances and more stages → higher priority (smaller is better)
+            urgency = (stages_left / max(1, chances_left))
+            # within same urgency bucket, earlier phase first
+            stage_rank = {"O": 0, "E": 1, "A": 2}.get(stage, 3)
+            return (must_today, urgency, stage_rank, nm.lower())
+
+        cands.sort(key=cand_key)
+
+        # try to allocate tags over the number of boardings
+        per_tags: Dict[str, List[str]] = {nm: [] for nm in cands}
+
+        def assign_one(nm: str, track: str, stage: str) -> Optional[str]:
+            m = members[nm]
+            if track not in m.types:
+                return None
+            rem = m.remaining.get(track, [])
+            if not rem or rem[0] != stage:
+                return None
+            # consume stage
+            m.remaining[track].pop(0)
+            return stage
+
+        b = 1
+        while b <= num_boardings and cands:
+            used_non_obs = False
+            # re-sort per boarding (finishability can change as we consume stages)
+            cands.sort(key=cand_key)
+            for nm in cands:
+                need = next_need(nm)
+                if not need:
+                    continue
+                track, stage = need
+                if stage == "O":
+                    st = assign_one(nm, track, "O")
+                    if st:
+                        per_tags[nm].append(st)
+                else:
+                    if used_non_obs:
+                        continue
+                    st = assign_one(nm, track, stage)
+                    if st:
+                        per_tags[nm].append(st)
+                        used_non_obs = True
+            b += 1
+
+        day_tags = {nm: "&".join(v) for nm, v in per_tags.items() if v}
+        if day_tags:
+            out_tags[d] = day_tags
+
+    return out_tags
 
 # ========= Tables for templates =========
 
@@ -1075,7 +1218,12 @@ def results():
 
     # Plan
     # Plan
-    nsf_schedule, stats, nstt_roles = plan_ops_assignments(all_ops, bad_ops, people, team_size, target_bad, nstt_cfg)
+    # Plan NSF teams and initial stats (ignore the inline NSTT tags; we’ll rebuild tags globally)
+    nsf_schedule, stats, _ = plan_ops_assignments(all_ops, bad_ops, people, team_size, target_bad, nstt_cfg)
+
+    # Rebuild NSTT tags with a month-aware finisher pass (prevents “ZhongSing can’t finish”)
+    nstt_roles = rebuild_nstt_tags_for_completion(all_ops, nsf_schedule, nstt_cfg)
+
 
     # Leaders: initial plan
     # Leaders: initial plan
