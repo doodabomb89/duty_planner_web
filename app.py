@@ -1052,12 +1052,12 @@ def results():
     nsf_schedule, stats, nstt_roles = plan_ops_assignments(all_ops, bad_ops, people, team_size, target_bad, nstt_cfg)
 
     # Leaders: initial plan
+    # Leaders: initial plan
     leader_bad_targets = build_leader_bad_targets(regs, bad_ops)
-    leaders_by_day = plan_leaders_for_ops(all_ops, regs, bad_ops, leader_bad_targets)
+    leaders_by_day = plan_leaders_for_ops(all_ops, regs, bad_ops)  # correct 3-arg call
 
     # Leaders: fairness audit & repair (shift bad days from over-target to under-target where legal)
-    leaders_by_day = plan_leaders_for_ops(all_ops, regs, bad_ops)
-
+    leaders_by_day = rebalance_leader_bad_days(all_ops, bad_ops, leaders_by_day, regs, leader_bad_targets)
 
     # Standby after final leader plan
     standby = plan_standby_with_leaders(all_ops, nsf_schedule, people, leaders_by_day, regs, start_date, end_date)
