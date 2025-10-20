@@ -424,6 +424,19 @@ def plan_ops_assignments(
     stats = {p.name: {"total": 0, "bad": 0} for p in people}
     schedule: Dict[date, List[str]] = {}
     nstt_day_roles: Dict[date, Dict[str, str]] = {}
+        # Fast lookups
+    by_name = {p.name: p for p in people}
+    ops_set = set(all_ops)
+
+    # Precompute each person's ops they can attend (for “urgency” math)
+    avail_ops_by_person: Dict[str, List[date]] = {
+        p.name: [dd for dd in all_ops if dd not in p.unavailable_ops]
+        for p in people
+    }
+
+    def future_ops_left(nm: str, today: date) -> int:
+        # number of ops from today onward the person can still attend
+        return sum(1 for dd in avail_ops_by_person.get(nm, []) if dd >= today)
 
     def next_need(nm: str) -> Optional[Tuple[str, str]]:
         m = nstt_cfg.members.get(nm)
@@ -451,29 +464,36 @@ def plan_ops_assignments(
             bad_diff = stats[p.name]["bad"] - target_bad.get(p.name, 0.0)
             total = stats[p.name]["total"]
 
-            # small bias to start/continue NSTT O/E earlier in the month
+            # Stronger, urgency-based bias to get NSTT done early
             nstt_bias = 0.0
             if nstt_cfg.enabled and p.name in nstt_cfg.members:
                 m = nstt_cfg.members[p.name]
                 start = m.start_date or nstt_cfg.global_start
                 can_start = (start is None) or (d >= start)
                 if can_start:
-                    need = next_need(p.name)
+                    need = next_need(p.name)  # -> (track, stage) or None
                     if need:
-                        stage = need[1]
-                        if stage == "O":
-                            nstt_bias = -1.5
-                        elif stage == "E":
-                            nstt_bias = -1.0
-                        elif stage == "A":
-                            nstt_bias = -0.2
+                        track, stage = need
+                        stages_left = len(m.remaining.get(track, []))
+                        chances_left = future_ops_left(p.name, d)
+                        # urgency: fewer chances and more stages => stronger pull earlier
+                        urgency = (stages_left / max(1, chances_left))
+                        # O before E before A, but urgency first
+                        phase_bonus = {"O": 0.3, "E": 0.2, "A": 0.1}.get(stage, 0.0)
+                        # negative = earlier in sort (higher priority)
+                        nstt_bias = -(2.0 * urgency + phase_bonus)
 
             if is_bad:
+                # On bad days, minimize how far someone is over their bad target,
+                # then by total workload, then by NSTT urgency bias
                 return (bad_diff, total, nstt_bias, p.name.lower())
             else:
+                # On normal days, prefer those slightly over their bad-deal target
+                # to save under-target people for future bad days
                 over_target = 1 if (stats[p.name]["bad"] > target_bad.get(p.name, 0.0) + 0.0001) else 0
-                # prefer over-target people on normal days (negative to make them earlier)
                 return (-over_target, total, nstt_bias, p.name.lower())
+
+        ranked = sorted(avail, key=key)
 
         ranked = sorted(avail, key=key)
 
@@ -526,27 +546,35 @@ def plan_ops_assignments(
                 cands = [nm for nm in team_names if can_start(nm) and next_need(nm) is not None]
 
                 # Prioritize stage O, then E, then A
-                def prio(nm: str):
-                    t = next_need(nm)
-                    rank = {"O": 0, "E": 1, "A": 2}.get(t[1], 3) if t else 3
-                    return (rank, stats[nm]["total"], nm.lower())
+                                # Prioritize candidates by *urgency* first, then by stage (O<E<A)
+                def prio_urgency(nm: str):
+                    need = next_need(nm)  # (track, stage)
+                    if not need:
+                        return (999, 999, 999, stats[nm]["total"], nm.lower())
+                    track, stage = need
+                    stages_left = len(nstt_cfg.members[nm].remaining.get(track, []))
+                    chances_left = future_ops_left(nm, d)
+                    urgency = stages_left / max(1, chances_left)
+                    stage_rank = {"O": 0, "E": 1, "A": 2}.get(stage, 3)
+                    # fewer chances -> higher priority; more stages -> higher priority; then stage; then workload
+                    return (urgency, stage_rank, stats[nm]["total"], nm.lower())
 
-                cands.sort(key=prio)
+                cands.sort(key=prio_urgency)
                 chosen = cands[:2]
+
                 if chosen:
                     per_tags: Dict[str, List[str]] = {nm: [] for nm in chosen}
 
-                    def assign_one(nm: str, desired: str) -> Optional[str]:
+                    def assign_one(nm: str, track: str, stage: str) -> Optional[str]:
                         m = nstt_cfg.members[nm]
-                        # use C2 if pending, else E1
-                        t = "C2" if ("C2" in m.types and m.remaining.get("C2")) else ("E1" if "E1" in m.types else None)
-                        if not t or not m.remaining.get(t):
+                        if track not in m.types:
                             return None
-                        nxt = m.remaining[t][0]
-                        if desired != nxt:
+                        rem = m.remaining.get(track, [])
+                        if not rem or rem[0] != stage:
                             return None
-                        m.remaining[t].pop(0)
-                        return desired
+                        m.remaining[track].pop(0)
+                        return stage
+
 
                     b = 1
                     while b <= nb:
@@ -557,13 +585,13 @@ def plan_ops_assignments(
                                 continue
                             stage = t[1]
                             if stage == "O":
-                                st = assign_one(nm, "O")
+                                st = assign_one(nm, t[0], "O")
                                 if st:
                                     per_tags[nm].append(st)
                             else:
                                 if used_nonobs:
                                     continue
-                                st = assign_one(nm, stage)
+                                st = assign_one(nm, t[0], stage)
                                 if st:
                                     per_tags[nm].append(st)
                                     used_nonobs = True
