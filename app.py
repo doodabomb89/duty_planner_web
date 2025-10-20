@@ -523,7 +523,7 @@ def plan_ops_assignments(
                 stats[p.name]["bad"] += 1
 
         # NSTT assignment (up to 2 people; O/E preferred; at most one non-O per boarding)
-        if nstt_cfg.enabled:
+        if False and nstt_cfg.enabled:
             # boardings: 0 if in no_boarding list, 3 if in three_boarding list, else Sun=1, others=2
             if d in nstt_cfg.no_boarding_ops:
                 nb = 0
