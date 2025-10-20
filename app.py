@@ -317,6 +317,117 @@ def plan_leaders_for_ops(
             last_role_holder["C2"] = c2.name
 
     return out
+  
+def rebalance_leader_bad_days(
+    all_ops: List[date],
+    bad_ops: Set[date],
+    leaders_by_day: Dict[date, Dict[str, Optional[str]]],
+    regs: List[Regular],
+    leader_bad_targets: Dict[str, Dict[str, float]],
+) -> Dict[date, Dict[str, Optional[str]]]:
+    """
+    Post-planning fairness pass:
+    - For each role (C2, ATL, TL), try to move bad-day assignments from leaders above their
+      per-role bad-day target to leaders below their target, when a legal swap is possible.
+    - Respects role eligibility and C2's D+1 availability rule.
+    - Keeps per-day uniqueness (no double-assigning a person to multiple roles the same day).
+    """
+    # Quick lookups
+    regs_by_name: Dict[str, Regular] = {r.name: r for r in regs}
+    def _eligible(role: str, r: Regular, d: date, picked_today: Set[str]) -> bool:
+        if r.name in picked_today:
+            return False
+        if d in r.unavailable:
+            return False
+        if role == "TL" and r.roles != {"TL"}:
+            return False
+        if role == "ATL":
+            if r.roles not in ({"ATL"}, {"C2", "ATL"}):
+                return False
+        if role == "C2":
+            if "C2" not in r.roles:
+                return False
+            # C2 must also be free on D+1
+            if (d + timedelta(days=1)) in r.unavailable:
+                return False
+        return True
+
+    # Compute current per-role bad counts from the schedule
+    def current_counts() -> Dict[str, Dict[str, int]]:
+        counts: Dict[str, Dict[str, int]] = {}
+        for d in all_ops:
+            if d not in leaders_by_day:
+                continue
+            is_bad = d in bad_ops
+            for role, nm in leaders_by_day[d].items():
+                if not nm:
+                    continue
+                counts.setdefault(nm, {}).setdefault(role, 0)
+                if is_bad:
+                    counts[nm][role] += 1
+        return counts
+
+    # We’ll try a bounded number of adjustments
+    MAX_SWAPS = 200
+    swaps_done = 0
+
+    # Work role-by-role; users are most sensitive about C2, so do C2 first
+    for role in ["C2", "ATL", "TL"]:
+        # Iterate until no more beneficial swaps for this role
+        for _ in range(100):
+            changed_this_round = False
+            counts = current_counts()
+
+            # Build deficit/surplus lists
+            deficit: List[str] = []
+            surplus: List[str] = []
+            for r in regs:
+                tgt = leader_bad_targets.get(r.name, {}).get(role, 0.0)
+                cur = counts.get(r.name, {}).get(role, 0)
+                # Use a small band around target to avoid thrashing
+                if cur < int(tgt):           # under target
+                    deficit.append(r.name)
+                elif cur > int(tgt + 0.5):   # noticeably over target
+                    surplus.append(r.name)
+
+            if not deficit or not surplus:
+                break  # nothing to balance for this role
+
+            # Try to move one bad-day from any surplus -> any deficit
+            moved_one = False
+            for over_nm in surplus:
+                # Find a bad day where 'over_nm' holds this role
+                for d in sorted(bad_ops):
+                    if d not in leaders_by_day:
+                        continue
+                    if leaders_by_day[d].get(role) != over_nm:
+                        continue
+                    # Who is already picked today?
+                    picked_today = {v for v in leaders_by_day[d].values() if v}
+                    # Try each under-target candidate
+                    for under_nm in deficit:
+                        if under_nm == over_nm:
+                            continue
+                        cand_reg = regs_by_name.get(under_nm)
+                        if not cand_reg:
+                            continue
+                        if not _eligible(role, cand_reg, d, picked_today):
+                            continue
+                        # Swap: assign the under-target candidate to this role today
+                        leaders_by_day[d][role] = under_nm
+                        swaps_done += 1
+                        changed_this_round = True
+                        moved_one = True
+                        break
+                    if moved_one or swaps_done >= MAX_SWAPS:
+                        break
+                if moved_one or swaps_done >= MAX_SWAPS:
+                    break
+
+            if not changed_this_round or swaps_done >= MAX_SWAPS:
+                break
+
+    return leaders_by_day
 
 # ========= NSF planning (improved fairness; no OIL penalty; no D+1 exclusion) =========
 
@@ -960,9 +1071,19 @@ def results():
     target_bad = compute_bad_targets(people, bad_ops, team_size if not nstt_cfg.enabled else 5, carry)
 
     # Plan
+    # Plan
     nsf_schedule, stats, nstt_roles = plan_ops_assignments(all_ops, bad_ops, people, team_size, target_bad, nstt_cfg)
-    leaders_by_day = plan_leaders_for_ops(all_ops, regs, bad_ops)
+
+    # Leaders: initial plan
+    leader_bad_targets = build_leader_bad_targets(regs, bad_ops)
+    leaders_by_day = plan_leaders_for_ops(all_ops, regs, bad_ops, leader_bad_targets)
+
+    # Leaders: fairness audit & repair (shift bad days from over-target to under-target where legal)
+    leaders_by_day = rebalance_leader_bad_days(all_ops, bad_ops, leaders_by_day, regs, leader_bad_targets)
+
+    # Standby after final leader plan
     standby = plan_standby_with_leaders(all_ops, nsf_schedule, people, leaders_by_day, regs, start_date, end_date)
+
 
     tables = build_tables(all_ops, bad_ops, leaders_by_day, nsf_schedule, nstt_roles, stats, carry, standby, regs)
 
