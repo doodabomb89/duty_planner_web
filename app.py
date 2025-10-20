@@ -210,7 +210,6 @@ def plan_leaders_for_ops(
     all_ops: List[date],
     regs: List[Regular],
     bad_ops: Set[date],
-    leader_bad_targets: Dict[str, Dict[str, float]],
 ) -> Dict[date, Dict[str, Optional[str]]]:
     """
     Bad day: minimize (role_bad - target_role_bad), then role_tot, then overall_tot (tiny anti-streak).
@@ -218,6 +217,24 @@ def plan_leaders_for_ops(
     ATL-only preferred; fallback to C2+ATL; C2 must also be free on D+1.
     """
     from copy import deepcopy
+
+    # Build per-leader per-role targets so bad days are shared inside each role pool.
+    def _build_targets(regs_: List[Regular], bad_ops_: Set[date]) -> Dict[str, Dict[str, float]]:
+        bad_count = len(bad_ops_)
+        elig = {
+            "TL":  [r for r in regs_ if r.roles == {"TL"}],
+            "ATL": [r for r in regs_ if r.roles == {"ATL"} or r.roles == {"C2", "ATL"}],
+            "C2":  [r for r in regs_ if "C2" in r.roles],
+        }
+        targets: Dict[str, Dict[str, float]] = {r.name: {"TL": 0.0, "ATL": 0.0, "C2": 0.0} for r in regs_}
+        for role in ("TL", "ATL", "C2"):
+            n = max(1, len(elig[role]))
+            per = bad_count / n if n else 0.0
+            for r in elig[role]:
+                targets[r.name][role] = per
+        return targets
+
+    leader_bad_targets = _build_targets(regs, bad_ops)
     regs = deepcopy(regs)  # isolate stats within this run
 
     def overall_total(r: Regular) -> int:
@@ -232,18 +249,14 @@ def plan_leaders_for_ops(
         role_bad = role_s["bad"]
         role_tot = role_s["total"]
         all_tot = overall_total(r)
-        # tiny anti-streak to avoid the same person repeatedly on normal days
         streak = 1 if (not is_bad and last_role_holder.get(role) == r.name) else 0
 
-        # per-leader target for this role
         target = leader_bad_targets.get(r.name, {}).get(role, 0.0)
-        deficit = role_bad - target  # negative means "behind target" (good to pick on a bad day)
+        deficit = role_bad - target  # negative means "behind target" → good candidate on bad day
 
         if is_bad:
-            # Get leaders who are behind their role target first
             return (deficit, role_tot, all_tot, streak, r.name.lower())
         else:
-            # Keep overall totals even on normal days
             return (all_tot, role_tot, streak, r.name.lower())
 
     out: Dict[date, Dict[str, Optional[str]]] = {}
@@ -253,7 +266,7 @@ def plan_leaders_for_ops(
         out[d] = {"TL": None, "ATL": None, "C2": None}
 
         # TL (TL-only)
-        tl_pool = [r for r in regs if r.roles == {"TL"} and d not in r.unavailable and r.name not in picked]
+        tl_pool = [r for r in regs if r.roles == {"TL"} and (d not in r.unavailable) and (r.name not in picked)]
         if tl_pool:
             tl_pool.sort(key=lambda r: sort_key(r, "TL", is_bad))
             tl = tl_pool[0]
@@ -263,9 +276,9 @@ def plan_leaders_for_ops(
             picked.add(tl.name)
             last_role_holder["TL"] = tl.name
 
-        # ATL (ATL-only; else C2+ATL)
-        atl_only = [r for r in regs if r.roles == {"ATL"} and d not in r.unavailable and r.name not in picked]
-        c2_atl   = [r for r in regs if r.roles == {"C2","ATL"} and d not in r.unavailable and r.name not in picked]
+        # ATL (prefer ATL-only; else C2+ATL)
+        atl_only = [r for r in regs if r.roles == {"ATL"} and (d not in r.unavailable) and (r.name not in picked)]
+        c2_atl   = [r for r in regs if r.roles == {"C2", "ATL"} and (d not in r.unavailable) and (r.name not in picked)]
         pool = atl_only if atl_only else c2_atl
         if pool:
             pool.sort(key=lambda r: sort_key(r, "ATL", is_bad))
@@ -276,7 +289,7 @@ def plan_leaders_for_ops(
             picked.add(atl.name)
             last_role_holder["ATL"] = atl.name
 
-        # C2 (must not be unavailable on D+1)
+        # C2 (must be free D and D+1, not already picked)
         c2_pool = [
             r for r in regs
             if ("C2" in r.roles)
