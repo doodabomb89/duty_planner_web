@@ -495,8 +495,6 @@ def plan_ops_assignments(
 
         ranked = sorted(avail, key=key)
 
-        ranked = sorted(avail, key=key)
-
         # Fill team honoring ≤1 non-cleared
         team: List[Person] = []
         noncleared = 0
@@ -546,7 +544,7 @@ def plan_ops_assignments(
                 cands = [nm for nm in team_names if can_start(nm) and next_need(nm) is not None]
 
                 # Prioritize stage O, then E, then A
-                                # Prioritize candidates by *urgency* first, then by stage (O<E<A)
+                # Prioritize candidates by *urgency* first, then by stage (O<E<A)
                 def prio_urgency(nm: str):
                     need = next_need(nm)  # (track, stage)
                     if not need:
