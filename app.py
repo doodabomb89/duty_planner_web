@@ -294,7 +294,7 @@ def plan_leaders_for_ops(
             last_role_holder["C2"] = c2.name
 
     return out
-  
+
 def rebalance_leader_bad_days(
     all_ops: List[date],
     bad_ops: Set[date],
@@ -309,8 +309,8 @@ def rebalance_leader_bad_days(
     - Respects role eligibility and C2's D+1 availability rule.
     - Keeps per-day uniqueness (no double-assigning a person to multiple roles the same day).
     """
-    # Quick lookups
     regs_by_name: Dict[str, Regular] = {r.name: r for r in regs}
+
     def _eligible(role: str, r: Regular, d: date, picked_today: Set[str]) -> bool:
         if r.name in picked_today:
             return False
@@ -324,12 +324,10 @@ def rebalance_leader_bad_days(
         if role == "C2":
             if "C2" not in r.roles:
                 return False
-            # C2 must also be free on D+1
             if (d + timedelta(days=1)) in r.unavailable:
                 return False
         return True
 
-    # Compute current per-role bad counts from the schedule
     def current_counts() -> Dict[str, Dict[str, int]]:
         counts: Dict[str, Dict[str, int]] = {}
         for d in all_ops:
@@ -344,44 +342,35 @@ def rebalance_leader_bad_days(
                     counts[nm][role] += 1
         return counts
 
-    # We’ll try a bounded number of adjustments
     MAX_SWAPS = 200
     swaps_done = 0
 
-    # Work role-by-role; users are most sensitive about C2, so do C2 first
     for role in ["C2", "ATL", "TL"]:
-        # Iterate until no more beneficial swaps for this role
         for _ in range(100):
             changed_this_round = False
             counts = current_counts()
 
-            # Build deficit/surplus lists
             deficit: List[str] = []
             surplus: List[str] = []
             for r in regs:
                 tgt = leader_bad_targets.get(r.name, {}).get(role, 0.0)
                 cur = counts.get(r.name, {}).get(role, 0)
-                # Use a small band around target to avoid thrashing
-                if cur < int(tgt):           # under target
+                if cur < int(tgt):
                     deficit.append(r.name)
-                elif cur > int(tgt + 0.5):   # noticeably over target
+                elif cur > int(tgt + 0.5):
                     surplus.append(r.name)
 
             if not deficit or not surplus:
-                break  # nothing to balance for this role
+                break
 
-            # Try to move one bad-day from any surplus -> any deficit
             moved_one = False
             for over_nm in surplus:
-                # Find a bad day where 'over_nm' holds this role
                 for d in sorted(bad_ops):
                     if d not in leaders_by_day:
                         continue
                     if leaders_by_day[d].get(role) != over_nm:
                         continue
-                    # Who is already picked today?
                     picked_today = {v for v in leaders_by_day[d].values() if v}
-                    # Try each under-target candidate
                     for under_nm in deficit:
                         if under_nm == over_nm:
                             continue
@@ -390,7 +379,6 @@ def rebalance_leader_bad_days(
                             continue
                         if not _eligible(role, cand_reg, d, picked_today):
                             continue
-                        # Swap: assign the under-target candidate to this role today
                         leaders_by_day[d][role] = under_nm
                         swaps_done += 1
                         changed_this_round = True
@@ -417,26 +405,12 @@ def plan_ops_assignments(
     nstt_cfg: NSTTConfig,
 ) -> Tuple[Dict[date, List[str]], Dict[str, Dict[str, int]], Dict[date, Dict[str, str]]]:
 
-    # If NSTT is on, Ops NSF slots are fixed at 5
     if nstt_cfg.enabled:
         team_size = 5
 
     stats = {p.name: {"total": 0, "bad": 0} for p in people}
     schedule: Dict[date, List[str]] = {}
     nstt_day_roles: Dict[date, Dict[str, str]] = {}
-        # Fast lookups
-    by_name = {p.name: p for p in people}
-    ops_set = set(all_ops)
-
-    # Precompute each person's ops they can attend (for “urgency” math)
-    avail_ops_by_person: Dict[str, List[date]] = {
-        p.name: [dd for dd in all_ops if dd not in p.unavailable_ops]
-        for p in people
-    }
-
-    def future_ops_left(nm: str, today: date) -> int:
-        # number of ops from today onward the person can still attend
-        return sum(1 for dd in avail_ops_by_person.get(nm, []) if dd >= today)
 
     def next_need(nm: str) -> Optional[Tuple[str, str]]:
         m = nstt_cfg.members.get(nm)
@@ -457,45 +431,34 @@ def plan_ops_assignments(
             schedule[d] = []
             continue
 
-        # Ranking key:
-        # Bad day => (bad_diff, total, nstt_bias, name)
-        # Normal  => (-over_target_flag, total, nstt_bias, name)
         def key(p: Person):
             bad_diff = stats[p.name]["bad"] - target_bad.get(p.name, 0.0)
             total = stats[p.name]["total"]
 
-            # Stronger, urgency-based bias to get NSTT done early
             nstt_bias = 0.0
             if nstt_cfg.enabled and p.name in nstt_cfg.members:
                 m = nstt_cfg.members[p.name]
                 start = m.start_date or nstt_cfg.global_start
                 can_start = (start is None) or (d >= start)
                 if can_start:
-                    need = next_need(p.name)  # -> (track, stage) or None
+                    need = next_need(p.name)
                     if need:
-                        track, stage = need
-                        stages_left = len(m.remaining.get(track, []))
-                        chances_left = future_ops_left(p.name, d)
-                        # urgency: fewer chances and more stages => stronger pull earlier
-                        urgency = (stages_left / max(1, chances_left))
-                        # O before E before A, but urgency first
-                        phase_bonus = {"O": 0.3, "E": 0.2, "A": 0.1}.get(stage, 0.0)
-                        # negative = earlier in sort (higher priority)
-                        nstt_bias = -(2.0 * urgency + phase_bonus)
+                        stage = need[1]
+                        if stage == "O":
+                            nstt_bias = -1.5
+                        elif stage == "E":
+                            nstt_bias = -1.0
+                        elif stage == "A":
+                            nstt_bias = -0.2
 
             if is_bad:
-                # On bad days, minimize how far someone is over their bad target,
-                # then by total workload, then by NSTT urgency bias
                 return (bad_diff, total, nstt_bias, p.name.lower())
             else:
-                # On normal days, prefer those slightly over their bad-deal target
-                # to save under-target people for future bad days
                 over_target = 1 if (stats[p.name]["bad"] > target_bad.get(p.name, 0.0) + 0.0001) else 0
                 return (-over_target, total, nstt_bias, p.name.lower())
 
         ranked = sorted(avail, key=key)
 
-        # Fill team honoring ≤1 non-cleared
         team: List[Person] = []
         noncleared = 0
         for cand in ranked:
@@ -507,7 +470,6 @@ def plan_ops_assignments(
             if len(team) == team_size:
                 break
 
-        # If exactly one non-cleared and somehow ended without a cleared teammate, swap in a cleared (paranoia)
         if noncleared == 1 and not any(t.cleared for t in team):
             extra = next((p for p in ranked if p.cleared and p not in team), None)
             if extra:
@@ -522,9 +484,7 @@ def plan_ops_assignments(
             if is_bad:
                 stats[p.name]["bad"] += 1
 
-        # NSTT assignment (up to 2 people; O/E preferred; at most one non-O per boarding)
-        if False and nstt_cfg.enabled:
-            # boardings: 0 if in no_boarding list, 3 if in three_boarding list, else Sun=1, others=2
+        if nstt_cfg.enabled:
             if d in nstt_cfg.no_boarding_ops:
                 nb = 0
             elif d in nstt_cfg.three_boarding_ops:
@@ -534,45 +494,36 @@ def plan_ops_assignments(
 
             if nb > 0:
                 team_names = schedule[d]
-                # can start today and has any remaining
+
                 def can_start(nm: str) -> bool:
                     m = nstt_cfg.members.get(nm)
                     if not m:
                         return False
                     start = m.start_date or nstt_cfg.global_start
                     return (start is None) or (d >= start)
+
                 cands = [nm for nm in team_names if can_start(nm) and next_need(nm) is not None]
 
-                # Prioritize stage O, then E, then A
-                # Prioritize candidates by *urgency* first, then by stage (O<E<A)
-                def prio_urgency(nm: str):
-                    need = next_need(nm)  # (track, stage)
-                    if not need:
-                        return (999, 999, 999, stats[nm]["total"], nm.lower())
-                    track, stage = need
-                    stages_left = len(nstt_cfg.members[nm].remaining.get(track, []))
-                    chances_left = future_ops_left(nm, d)
-                    urgency = stages_left / max(1, chances_left)
-                    stage_rank = {"O": 0, "E": 1, "A": 2}.get(stage, 3)
-                    # fewer chances -> higher priority; more stages -> higher priority; then stage; then workload
-                    return (urgency, stage_rank, stats[nm]["total"], nm.lower())
+                def prio(nm: str):
+                    t = next_need(nm)
+                    rank = {"O": 0, "E": 1, "A": 2}.get(t[1], 3) if t else 3
+                    return (rank, stats[nm]["total"], nm.lower())
 
-                cands.sort(key=prio_urgency)
+                cands.sort(key=prio)
                 chosen = cands[:2]
-
                 if chosen:
                     per_tags: Dict[str, List[str]] = {nm: [] for nm in chosen}
 
-                    def assign_one(nm: str, track: str, stage: str) -> Optional[str]:
+                    def assign_one(nm: str, desired: str) -> Optional[str]:
                         m = nstt_cfg.members[nm]
-                        if track not in m.types:
+                        t = "C2" if ("C2" in m.types and m.remaining.get("C2")) else ("E1" if "E1" in m.types else None)
+                        if not t or not m.remaining.get(t):
                             return None
-                        rem = m.remaining.get(track, [])
-                        if not rem or rem[0] != stage:
+                        nxt = m.remaining[t][0]
+                        if desired != nxt:
                             return None
-                        m.remaining[track].pop(0)
-                        return stage
-
+                        m.remaining[t].pop(0)
+                        return desired
 
                     b = 1
                     while b <= nb:
@@ -583,13 +534,13 @@ def plan_ops_assignments(
                                 continue
                             stage = t[1]
                             if stage == "O":
-                                st = assign_one(nm, t[0], "O")
+                                st = assign_one(nm, "O")
                                 if st:
                                     per_tags[nm].append(st)
                             else:
                                 if used_nonobs:
                                     continue
-                                st = assign_one(nm, t[0], stage)
+                                st = assign_one(nm, stage)
                                 if st:
                                     per_tags[nm].append(st)
                                     used_nonobs = True
@@ -697,149 +648,6 @@ def plan_standby_with_leaders(
         standby[sday] = picks + nsf_picks
 
     return standby
-  
-from copy import deepcopy
-
-def rebuild_nstt_tags_for_completion(
-    all_ops: List[date],
-    nsf_schedule: Dict[date, List[str]],
-    nstt_cfg: NSTTConfig,
-) -> Dict[date, Dict[str, str]]:
-    """
-    Re-assign NSTT tags *after* the NSF schedule is known, to maximize
-    the number of people who can FINISH their NSTT within the month.
-
-    Rules kept:
-      - At most 2 NSTT people per Op day.
-      - 'O' before 'E' before 'A' per track, and within a day at most ONE non-O per boarding.
-      - Respect individual start dates and availability (implied by NSF team that day).
-      - Prefer candidates who CANNOT finish this month if they skip today.
-      - Then prefer higher 'urgency': stages_left / future_scheduled_ops_left.
-      - Then prefer earlier stage (O < E < A), then lower workload.
-    """
-    if not nstt_cfg.enabled:
-        return {}
-
-    # fresh, independent copy so we can mutate remaining stages cleanly
-    members = deepcopy(nstt_cfg.members)
-
-    # Precompute: for each person, list of *scheduled* Ops from today on
-    scheduled_ops_by_person: Dict[str, List[date]] = {}
-    for d in sorted(all_ops):
-        team = nsf_schedule.get(d, [])
-        for nm in team:
-            scheduled_ops_by_person.setdefault(nm, []).append(d)
-
-    def next_need(nm: str) -> Optional[Tuple[str, str]]:
-        m = members.get(nm)
-        if not m:
-            return None
-        # honor declared types; stage order is the remaining list head
-        for track in ("C2", "E1"):
-            if track in m.types and m.remaining.get(track):
-                return (track, m.remaining[track][0])
-        return None
-
-    def future_scheduled_left(nm: str, today: date) -> int:
-        # count how many *scheduled* ops (>= today) the person still has
-        arr = scheduled_ops_by_person.get(nm, [])
-        return sum(1 for dd in arr if dd >= today)
-
-    # assign tags day-by-day with a global awareness of "finishability"
-    out_tags: Dict[date, Dict[str, str]] = {}
-
-    for d in sorted(all_ops):
-        team = nsf_schedule.get(d, [])
-        if not team:
-            continue
-
-        # how many boardings today?
-        if d in nstt_cfg.no_boarding_ops:
-            num_boardings = 0
-        elif d in nstt_cfg.three_boarding_ops:
-            num_boardings = 3
-        else:
-            # Sun=1, others=2
-            num_boardings = 1 if d.weekday() == 6 else 2
-
-        if num_boardings <= 0:
-            continue
-
-        # candidates = team members who can start and still need something
-        def can_start(nm: str) -> bool:
-            m = members.get(nm)
-            if not m:
-                return False
-            start = m.start_date or nstt_cfg.global_start
-            return (start is None) or (d >= start)
-
-        cands = [nm for nm in team if can_start(nm) and next_need(nm) is not None]
-        if not cands:
-            continue
-
-        # rank candidates with a finishability-first sort key
-        def cand_key(nm: str):
-            need = next_need(nm)         # (track, stage)
-            if not need:
-                # put at the very end
-                return (1, 999.0, 999, nm.lower())
-            track, stage = need
-            m = members[nm]
-            stages_left = len(m.remaining.get(track, []))
-            chances_left = future_scheduled_left(nm, d)
-            # if skipping TODAY means they cannot finish this month:
-            # i.e., remaining scheduled ops < remaining stages
-            must_today = 0 if chances_left < stages_left else 1
-            # urgency: fewer chances and more stages → higher priority (smaller is better)
-            urgency = (stages_left / max(1, chances_left))
-            # within same urgency bucket, earlier phase first
-            stage_rank = {"O": 0, "E": 1, "A": 2}.get(stage, 3)
-            return (must_today, urgency, stage_rank, nm.lower())
-
-        cands.sort(key=cand_key)
-
-        # try to allocate tags over the number of boardings
-        per_tags: Dict[str, List[str]] = {nm: [] for nm in cands}
-
-        def assign_one(nm: str, track: str, stage: str) -> Optional[str]:
-            m = members[nm]
-            if track not in m.types:
-                return None
-            rem = m.remaining.get(track, [])
-            if not rem or rem[0] != stage:
-                return None
-            # consume stage
-            m.remaining[track].pop(0)
-            return stage
-
-        b = 1
-        while b <= num_boardings and cands:
-            used_non_obs = False
-            # re-sort per boarding (finishability can change as we consume stages)
-            cands.sort(key=cand_key)
-            for nm in cands:
-                need = next_need(nm)
-                if not need:
-                    continue
-                track, stage = need
-                if stage == "O":
-                    st = assign_one(nm, track, "O")
-                    if st:
-                        per_tags[nm].append(st)
-                else:
-                    if used_non_obs:
-                        continue
-                    st = assign_one(nm, track, stage)
-                    if st:
-                        per_tags[nm].append(st)
-                        used_non_obs = True
-            b += 1
-
-        day_tags = {nm: "&".join(v) for nm, v in per_tags.items() if v}
-        if day_tags:
-            out_tags[d] = day_tags
-
-    return out_tags
 
 # ========= Tables for templates =========
 
@@ -892,7 +700,6 @@ def build_tables(
         co = carry.get(name, 0)
         nsf_summary_rows.append([name, f"{total}/{total_ops_count}", str(bad), str(co)])
 
-    # Leader summary recomputed from leaders_by_day (robust to any internal changes)
     leader_summary_rows: List[List[str]] = []
     role_order = ["TL", "ATL", "C2"]
     leader_stats: Dict[str, Dict[str, Dict[str, int]]] = {}
@@ -1217,25 +1024,17 @@ def results():
     target_bad = compute_bad_targets(people, bad_ops, team_size if not nstt_cfg.enabled else 5, carry)
 
     # Plan
-    # Plan
-    # Plan NSF teams and initial stats (ignore the inline NSTT tags; we’ll rebuild tags globally)
-    nsf_schedule, stats, _ = plan_ops_assignments(all_ops, bad_ops, people, team_size, target_bad, nstt_cfg)
+    nsf_schedule, stats, nstt_roles = plan_ops_assignments(all_ops, bad_ops, people, team_size, target_bad, nstt_cfg)
 
-    # Rebuild NSTT tags with a month-aware finisher pass (prevents “ZhongSing can’t finish”)
-    nstt_roles = rebuild_nstt_tags_for_completion(all_ops, nsf_schedule, nstt_cfg)
-
-
-    # Leaders: initial plan
     # Leaders: initial plan
     leader_bad_targets = build_leader_bad_targets(regs, bad_ops)
-    leaders_by_day = plan_leaders_for_ops(all_ops, regs, bad_ops)  # correct 3-arg call
+    leaders_by_day = plan_leaders_for_ops(all_ops, regs, bad_ops)
 
     # Leaders: fairness audit & repair (shift bad days from over-target to under-target where legal)
     leaders_by_day = rebalance_leader_bad_days(all_ops, bad_ops, leaders_by_day, regs, leader_bad_targets)
 
     # Standby after final leader plan
     standby = plan_standby_with_leaders(all_ops, nsf_schedule, people, leaders_by_day, regs, start_date, end_date)
-
 
     tables = build_tables(all_ops, bad_ops, leaders_by_day, nsf_schedule, nstt_roles, stats, carry, standby, regs)
 
