@@ -152,29 +152,6 @@ def compute_bad_targets(people: List[Person], bad_ops: Set[date], team_size: int
         adj = base - carry.get(p.name, 0)
         targets[p.name] = max(0.0, adj)
     return targets
-def compute_leader_bad_targets(regs: List["Regular"], bad_ops: Set[date]) -> Dict[str, Dict[str, float]]:
-    """
-    Return {name: {"TL": tgt, "ATL": tgt, "C2": tgt}} with per-role bad-day targets
-    based on equal share of bad days within each role pool.
-    """
-    num_bad = len(bad_ops)
-    # Build role pools
-    tl_pool  = [r for r in regs if r.roles == {"TL"}]
-    atl_pool = [r for r in regs if r.roles == {"ATL"} or r.roles == {"C2", "ATL"}]
-    c2_pool  = [r for r in regs if "C2" in r.roles]
-
-    tl_tgt  = (num_bad / max(1, len(tl_pool))) if tl_pool else 0.0
-    atl_tgt = (num_bad / max(1, len(atl_pool))) if atl_pool else 0.0
-    c2_tgt  = (num_bad / max(1, len(c2_pool))) if c2_pool else 0.0
-
-    targets: Dict[str, Dict[str, float]] = {}
-    for r in regs:
-        targets[r.name] = {
-            "TL":  tl_tgt  if r.roles == {"TL"}           else 0.0,
-            "ATL": atl_tgt if (r.roles == {"ATL"} or r.roles == {"C2","ATL"}) else 0.0,
-            "C2":  c2_tgt  if ("C2" in r.roles)           else 0.0,
-        }
-    return targets
 
 def build_leader_bad_targets(regs: List[Regular], bad_ops: Set[date]) -> Dict[str, Dict[str, float]]:
     """
@@ -1079,7 +1056,8 @@ def results():
     leaders_by_day = plan_leaders_for_ops(all_ops, regs, bad_ops, leader_bad_targets)
 
     # Leaders: fairness audit & repair (shift bad days from over-target to under-target where legal)
-    leaders_by_day = rebalance_leader_bad_days(all_ops, bad_ops, leaders_by_day, regs, leader_bad_targets)
+    leaders_by_day = plan_leaders_for_ops(all_ops, regs, bad_ops)
+
 
     # Standby after final leader plan
     standby = plan_standby_with_leaders(all_ops, nsf_schedule, people, leaders_by_day, regs, start_date, end_date)
