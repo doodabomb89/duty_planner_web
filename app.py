@@ -629,16 +629,16 @@ def plan_ops_assignments(
 
         # constraint: O must be a different calendar day than E/A
         def eligible_for_nonobserver(nm: str) -> bool:
-        """
-        A trainee can take a non-observer slot (E or A) this boarding if their
-        next stage is E or A. It's OK if they already did O earlier today.
-        Only one non-observer per boarding is enforced elsewhere.
-        """
-        nxt = next_stage(nm)
-        if not nxt:
-            return False
-        stg = nxt[1]
-        return stg in ("E", "A")
+            """
+            A trainee can take a non-observer slot (E or A) this boarding if their
+            next stage is E or A. It's OK if they already did O earlier today.
+            Only one non-observer per boarding is enforced elsewhere.
+            """
+            nxt = next_stage(nm)
+            if not nxt:
+                return False
+            stg = nxt[1]
+            return stg in ("E", "A")
 
 
         def eligible_for_observer(nm: str) -> bool:
