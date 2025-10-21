@@ -21,38 +21,47 @@
         <h5 class="mb-2">Leader #{{ i }}</h5>
         {% set existing = existing_leaders[i-1] if existing_leaders|length >= i else None %}
         <div class="row g-3">
+          <!-- Name -->
           <div class="col-md-4">
             <label for="leader_name_{{ i }}" class="form-label">Name</label>
             <div class="input-group">
               <span class="input-group-text"><i class="fa-solid fa-id-card"></i></span>
-              <input type="text" class="form-control" id="leader_name_{{ i }}" name="leader_name_{{ i }}" placeholder="Full name"
-                     value="{{ existing.name if existing else '' }}" required>
+              <input type="text" class="form-control" id="leader_name_{{ i }}" name="leader_name_{{ i }}"
+                     placeholder="Full name" value="{{ existing.name if existing else '' }}" required>
             </div>
           </div>
+
+          <!-- Roles (select) -->
           <div class="col-md-4">
             <label for="leader_roles_{{ i }}" class="form-label">Roles</label>
             <div class="input-group">
               <span class="input-group-text"><i class="fa-solid fa-layer-group"></i></span>
-              <input type="text" class="form-control" id="leader_roles_{{ i }}" name="leader_roles_{{ i }}"
-                     placeholder="e.g. TL, ATL, C2" value="{% if existing %}{{ existing.roles | join(',') }}{% endif %}" required>
+              <select class="form-select" id="leader_roles_{{ i }}" name="leader_roles_{{ i }}" required>
+                <option value="TL"     {% if existing and existing.roles_code == 'TL' %}selected{% endif %}>TL</option>
+                <option value="ATL"    {% if existing and existing.roles_code == 'ATL' %}selected{% endif %}>ATL</option>
+                <option value="C2"     {% if existing and existing.roles_code == 'C2' %}selected{% endif %}>C2</option>
+                <option value="C2,ATL" {% if existing and existing.roles_code == 'C2,ATL' %}selected{% endif %}>C2,ATL</option>
+              </select>
             </div>
           </div>
+
+          <!-- Unavailable days -->
           <div class="col-md-4">
             <label for="leader_unavail_{{ i }}" class="form-label">Unavailable days (DD or DD-DD)</label>
             <div class="input-group">
               <span class="input-group-text"><i class="fa-solid fa-calendar-xmark"></i></span>
               <input type="text" class="form-control" id="leader_unavail_{{ i }}" name="leader_unavail_{{ i }}"
-                     placeholder="e.g. 5, 10-12"
-                     value="{% if existing %}{{ existing.unavailable | map('split','-') | map('last') | join(',') }}{% endif %}">
+                     placeholder="e.g. 5, 10-12" value="{{ existing.unavail_csv if existing else '' }}">
             </div>
           </div>
         </div>
       </div>
       {% endfor %}
 
+      <!-- Special Ops Days -->
       <div class="mb-3">
         <h5 class="mb-2"><i class="fa-solid fa-star me-1"></i> Special Ops Days</h5>
-        <p class="text-muted">Specify any Ops dates that should have 3 boardings (i.e., more trainees) or 0 boardings (frontloaded training days). Leave blank if none.</p>
+        <p class="text-muted">Specify any Ops dates that should have 3 boardings or 0 boardings. Leave blank if none.</p>
         <div class="row g-3">
           <div class="col-md-6">
             <label for="three_boardings_any" class="form-label">Ops days with 3 boardings</label>
@@ -74,14 +83,13 @@
       </div>
 
       <div class="d-flex justify-content-between">
-        <a href="{{ url_for('nsfs') }}" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Back</a>
-        <button type="submit" class="btn btn-success">
-          {% if session.get('nstt_enabled') %}
-          <i class="fa-solid fa-arrow-right me-1"></i>Next: NSTT
-          {% else %}
-          <i class="fa-solid fa-arrow-right me-1"></i>Next: Carryover
-          {% endif %}
-        </button>
+        {% if session.get('nstt_enabled') %}
+          <a href="{{ url_for('nsfs') }}" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Back</a>
+          <button type="submit" class="btn btn-success"><i class="fa-solid fa-arrow-right me-1"></i>Next: NSTT</button>
+        {% else %}
+          <a href="{{ url_for('nsfs') }}" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Back</a>
+          <button type="submit" class="btn btn-success"><i class="fa-solid fa-arrow-right me-1"></i>Next: Carryover</button>
+        {% endif %}
       </div>
     </form>
   </div>
