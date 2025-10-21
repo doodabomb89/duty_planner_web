@@ -552,6 +552,165 @@ def plan_ops_assignments(
 
     return schedule, stats, nstt_day_roles
 
+from copy import deepcopy
+
+def replan_nstt_tags(
+    all_ops: List[date],
+    nsf_schedule: Dict[date, List[str]],
+    people: List[Person],
+    nstt_cfg: NSTTConfig,
+) -> Dict[date, Dict[str, str]]:
+    """
+    Second pass NSTT planner that *only* decides who gets O/E/A tags on each day,
+    WITHOUT changing team membership or fairness.
+    Goal: maximize completion (give scarce E/A to the most urgent candidates first).
+    Obeys:
+      - ≤2 trainees/day
+      - ≤1 E/A per boarding (observers can be concurrent)
+      - O→E→A ordering; E & A same day allowed if capacity permits
+      - Per/person or global start date
+      - Person must be on that day's Ops team and not constrained that day
+    """
+    if not nstt_cfg.enabled:
+        return {}
+
+    # Build quick lookups
+    by_name = {p.name: p for p in people}
+    remaining = {nm: {"C2": list(m.remaining.get("C2", [])),
+                      "E1": list(m.remaining.get("E1", []))}
+                 for nm, m in nstt_cfg.members.items()}
+    starts = {nm: (m.start_date or nstt_cfg.global_start) for nm, m in nstt_cfg.members.items()}
+
+    # Helper: how many *future* eligible team-days does a candidate still have?
+    def future_team_slots(nm: str, after_day: date) -> int:
+        cnt = 0
+        p = by_name.get(nm)
+        if not p:
+            return 0
+        st = starts.get(nm)
+        for d in all_ops:
+            if d <= after_day:
+                continue
+            if st and d < st:
+                continue
+            if d in p.unavailable_ops:
+                continue
+            if nm in (nsf_schedule.get(d) or []):
+                cnt += 1
+        return cnt
+
+    # Capacity per day (same as your first pass)
+    def boardings_on(d: date) -> int:
+        if d in nstt_cfg.no_boarding_ops:
+            return 0
+        if d in nstt_cfg.three_boarding_ops:
+            return 3
+        return 1 if d.weekday() == 6 else 2  # Sun:1, else:2
+
+    tags_by_day: Dict[date, Dict[str, str]] = {}
+
+    # We plan sequentially day by day so completion cascades correctly.
+    for d in sorted(all_ops):
+        team = nsf_schedule.get(d, [])
+        if not team:
+            continue
+
+        nb = boardings_on(d)
+        if nb <= 0:
+            continue
+
+        # Eligible candidates: on team, not constrained for Ops that day, started
+        def eligible(nm: str) -> bool:
+            if nm not in nstt_cfg.members:
+                return False
+            p = by_name.get(nm)
+            if not p:
+                return False
+            if d in p.unavailable_ops:
+                return False
+            st = starts.get(nm)
+            if st and d < st:
+                return False
+            # still has anything left?
+            rem = remaining.get(nm, {})
+            return bool((rem.get("C2") and len(rem["C2"]) > 0) or (rem.get("E1") and len(rem["E1"]) > 0))
+
+        cands = [nm for nm in team if eligible(nm)]
+        if not cands:
+            continue
+
+        # Urgency score:
+        # - fewer future team slots -> higher urgency
+        # - more stages left -> higher urgency
+        # - stage priority O < E < A (we'll decide per-boarding below)
+        def urgency(nm: str) -> tuple:
+            rem = remaining[nm]
+            stages_left = (len(rem.get("C2", [])) + len(rem.get("E1", [])))
+            fut = future_team_slots(nm, d)  # lower is better
+            return (fut, -stages_left, nm.lower())
+
+        # We'll assign per boarding: one non-observer per boarding, observers can piggyback.
+        # Keep at most two active trainees across the day.
+        cands.sort(key=urgency)
+        day_tags: Dict[str, List[str]] = {nm: [] for nm in cands}
+        chosen = cands[:2]  # ≤2 trainees/day
+
+        # Helper: pop the next needed stage for a person (type-pref and stage order)
+        def next_stage(nm: str) -> Optional[Tuple[str, str]]:
+            rem = remaining.get(nm, {})
+            for t in ("C2", "E1"):
+                seq = rem.get(t, [])
+                if seq:
+                    return (t, seq[0])
+            return None
+
+        # Assign across boardings
+        for b in range(nb):
+            used_nonobs = False
+            # 1) Try to give E/A to the most urgent guy who needs E or A
+            for nm in chosen:
+                nxt = next_stage(nm)
+                if not nxt:
+                    continue
+                t, stg = nxt
+                if stg in ("E","A"):
+                    if used_nonobs:
+                        continue
+                    # assign E/A
+                    remaining[nm][t].pop(0)
+                    day_tags[nm].append(stg)
+                    used_nonobs = True
+
+            # 2) Fill observers (O) and possibly a second non-observer if none taken yet
+            for nm in chosen:
+                nxt = next_stage(nm)
+                if not nxt:
+                    continue
+                t, stg = nxt
+                if stg == "O":
+                    # observers can co-exist with E/A in same boarding
+                    remaining[nm][t].pop(0)
+                    day_tags[nm].append("O")
+
+            # If nobody took non-observer (rare), try again for E/A now
+            if not used_nonobs:
+                for nm in chosen:
+                    nxt = next_stage(nm)
+                    if not nxt:
+                        continue
+                    t, stg = nxt
+                    if stg in ("E","A"):
+                        remaining[nm][t].pop(0)
+                        day_tags[nm].append(stg)
+                        break  # only one non-observer per boarding
+
+        # Finalize tags for the day
+        tags = {nm: "&".join(v) for nm, v in day_tags.items() if v}
+        if tags:
+            tags_by_day[d] = tags
+
+    return tags_by_day
+
 # ========= Standby (unchanged logic from your improved version) =========
 
 def plan_standby_with_leaders(
@@ -662,14 +821,22 @@ def build_tables(
     standby: Dict[date, List[str]],
     regs: List[Regular],
 ) -> Dict[str, Any]:
+    # Pretty ops rows (unchanged)
     ops_rows: List[List[str]] = []
+    # Flat ops rows for copy-to-Excel: [Date, TL, ATL, C2, NSF1..NSF5, NSTT1, NSTT2]
+    ops_rows_flat: List[List[str]] = []
+    ops_headers_flat = ["Date", "TL", "ATL", "C2", "NSF1", "NSF2", "NSF3", "NSF4", "NSF5", "NSTT1", "NSTT2"]
+
     for d in sorted(all_ops):
         day_str = f"{d.day:02d} {d.strftime('%b').lower()} ({d.strftime('%a').lower()})"
         if d in bad_ops:
             day_str = f"*{day_str}*"
+
         leaders = leaders_by_day.get(d, {"TL": None, "ATL": None, "C2": None})
         nsf_names = nsf_schedule.get(d, [])
         nstt_tags = nstt_roles.get(d, {})
+
+        # Pretty string (unchanged)
         normal_nsfs = [nm for nm in nsf_names if nm not in nstt_tags]
         tagged_nsfs = [f"{nm}({nstt_tags[nm]})" for nm in nsf_names if nm in nstt_tags]
         nsf_str = ", ".join(normal_nsfs + tagged_nsfs) if nsf_names else "—"
@@ -681,7 +848,25 @@ def build_tables(
             nsf_str,
         ])
 
+        # Flat row
+        nsf_slots = (nsf_names + ["", "", "", "", ""])[:5]
+        nstt_list = [f"{nm}:{nstt_tags[nm]}" for nm in nsf_names if nm in nstt_tags]
+        nstt_slots = (nstt_list + ["", ""])[:2]
+        ops_rows_flat.append([
+            f"{d.strftime('%Y-%m-%d')}",
+            leaders.get("TL") or "",
+            leaders.get("ATL") or "",
+            leaders.get("C2") or "",
+            *nsf_slots,
+            *nstt_slots
+        ])
+
+    # Standby pretty rows (unchanged)
     standby_rows: List[List[str]] = []
+    # Flat standby rows: [Date, TL, ATL, C2, NSF1, NSF2, NSF3]
+    standby_rows_flat: List[List[str]] = []
+    standby_headers_flat = ["Date", "TL", "ATL", "C2", "NSF1", "NSF2", "NSF3"]
+
     for sday in sorted(standby.keys()):
         day_str = f"{sday.day:02d} {sday.strftime('%b').lower()} ({sday.strftime('%a').lower()})"
         team = standby[sday]
@@ -691,6 +876,11 @@ def build_tables(
         nsfs = team[3:] if len(team) > 3 else []
         nsf_str = ", ".join(nsfs) if nsfs else "—"
         standby_rows.append([day_str, tl or "—", atl or "—", c2 or "—", nsf_str])
+
+        nsf_slots = (nsfs + ["", "", ""])[:3]
+        standby_rows_flat.append([
+            f"{sday.strftime('%Y-%m-%d')}", tl or "", atl or "", c2 or "", *nsf_slots
+        ])
 
     total_ops_count = len(all_ops)
     nsf_summary_rows: List[List[str]] = []
@@ -729,7 +919,11 @@ def build_tables(
 
     return {
         "ops_rows": ops_rows,
+        "ops_rows_flat": ops_rows_flat,
+        "ops_headers_flat": ops_headers_flat,
         "standby_rows": standby_rows,
+        "standby_rows_flat": standby_rows_flat,
+        "standby_headers_flat": standby_headers_flat,
         "nsf_summary_rows": nsf_summary_rows,
         "leader_summary_rows": leader_summary_rows,
     }
@@ -750,7 +944,15 @@ def reset_session():
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template(
+        "index.html",
+        start_date=session.get("start_date", ""),
+        end_date=session.get("end_date", ""),
+        anchor_date=session.get("anchor_date", ""),
+        num_nsf=session.get("num_nsf", ""),
+        num_leaders=session.get("num_leaders", ""),
+        nstt_enabled=session.get("nstt_enabled", False),
+    )
 
 @app.route("/step1", methods=["POST"])
 def step1():
@@ -788,6 +990,15 @@ def step1():
 def nsfs():
     if request.method == "POST":
         num = session.get("num_nsf")
+        if not isinstance(num, int) or num <= 0:
+            flash("Session expired or invalid NSF count. Please start again.")
+            return redirect(url_for("index"))
+        try:
+            start_date = parse_yyyy_mm_dd(session["start_date"])
+            end_date   = parse_yyyy_mm_dd(session["end_date"])
+        except Exception:
+            flash("Session dates missing. Please start again.")
+            return redirect(url_for("index"))
         roster: List[Dict[str, Any]] = []
         start_date = parse_yyyy_mm_dd(session["start_date"])
         end_date   = parse_yyyy_mm_dd(session["end_date"])
@@ -817,7 +1028,13 @@ def nsfs():
     num_nsf = session.get("num_nsf")
     if not num_nsf:
         return redirect(url_for("index"))
-    return render_template("nsfs.html", num_nsf=num_nsf)
+    return render_template(
+        "nsfs.html",
+        num_nsf=num_nsf,
+        existing_roster=session.get("roster", []),
+        team_size=session.get("nsf_team_size", 3),
+    )
+
 
 @app.route("/leaders", methods=["GET","POST"])
 def leaders():
@@ -861,7 +1078,14 @@ def leaders():
     num_leaders = session.get("num_leaders")
     if num_leaders is None:
         return redirect(url_for("index"))
-    return render_template("leaders.html", num_leaders=num_leaders)
+    return render_template(
+        "leaders.html",
+        num_leaders=num_leaders,
+        existing_leaders=session.get("leaders", []),
+        existing_three_any=",".join([d.split("-")[2] for d in session.get("three_boardings_any", [])]) if session.get("three_boardings_any") else "",
+        xisting_no_any=",".join([d.split("-")[2] for d in session.get("no_boardings_any", [])]) if session.get("no_boardings_any") else "",
+    )
+
 
 @app.route("/nstt", methods=["GET","POST"])
 def nstt():
@@ -1024,7 +1248,10 @@ def results():
     target_bad = compute_bad_targets(people, bad_ops, team_size if not nstt_cfg.enabled else 5, carry)
 
     # Plan
-    nsf_schedule, stats, nstt_roles = plan_ops_assignments(all_ops, bad_ops, people, team_size, target_bad, nstt_cfg)
+    nsf_schedule, stats, _first_pass_tags = plan_ops_assignments(all_ops, bad_ops, people, team_size, target_bad, nstt_cfg)
+    # Recompute NSTT tags with urgency-aware second pass (keeps team fairness intact)
+    nstt_roles = replan_nstt_tags(all_ops, nsf_schedule, people, nstt_cfg)
+
 
     # Leaders: initial plan
     leader_bad_targets = build_leader_bad_targets(regs, bad_ops)
