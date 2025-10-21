@@ -1025,17 +1025,32 @@ def nsfs():
         session["nsf_team_size"] = team_size
         return redirect(url_for("leaders"))
 
-    # 🔹 This is the GET branch — replace yours with this
+    # --- GET branch ---
     num_nsf = session.get("num_nsf")
     if not num_nsf:
         return redirect(url_for("index"))
-    # Convert dicts to objects for easier access in template
-    raw_roster = session.get("roster", [])
-    class Obj:
-        def __init__(self, d):
-            self.__dict__.update(d)
 
-    existing_roster = [Obj(r) for r in raw_roster]
+    raw_roster = session.get("roster", [])
+    
+    # Build a simple view-model for the template (strings only)
+    existing_roster = []
+    for r in raw_roster:
+        name = r.get("name", "")
+        cleared = bool(r.get("cleared", False))
+        iso_list = r.get("unavailable", []) or []
+        days = []
+        for iso in iso_list:
+            try:
+                # Expect 'YYYY-MM-DD' -> take 'DD'
+                parts = iso.split("-")
+                days.append(parts[2] if len(parts) == 3 else "")
+            except Exception:
+                pass
+        existing_roster.append({
+            "name": name,
+            "unavail_csv": ",".join([d for d in days if d]),
+            "cleared": cleared,
+        })
 
     return render_template(
         "nsfs.html",
@@ -1043,6 +1058,7 @@ def nsfs():
         existing_roster=existing_roster,
         team_size=session.get("nsf_team_size", 3),
     )
+
 
 
 
