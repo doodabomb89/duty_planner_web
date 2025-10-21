@@ -104,7 +104,6 @@
 
 {% block extra_scripts %}
 <script>
-  // Prefilled data from the server (safe, JSON-encoded)
   const existingMembers = {{ (existing_members or []) | tojson | safe }};
   const defaultRows = {{ (default_member_rows or 0) | int }};
 
@@ -157,14 +156,12 @@
     }
   }
 
-  // Initialize count and render on load
   if (!numField.value || parseInt(numField.value) === 0) {
     const initial = existingMembers.length > 0 ? existingMembers.length : (defaultRows || 0);
     numField.value = initial;
   }
   renderParticipants();
 
-  // Re-render when user changes the count
   numField.addEventListener('input', renderParticipants);
 </script>
 {% endblock %}
