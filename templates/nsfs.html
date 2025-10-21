@@ -1,5 +1,6 @@
 {% extends "layout.html" %}
 {% block content %}
+
 <!-- Progress bar -->
 <div class="mb-4">
   <div class="d-flex justify-content-between mb-1">
@@ -14,34 +15,60 @@
 <div class="card shadow-sm mb-4">
   <div class="card-body">
     <h2 class="card-title mb-3"><i class="fa-solid fa-user-friends me-1"></i> Enter NSF Roster</h2>
-    <p class="text-muted">For each NSF, provide their name, any days they're unavailable and whether they have clearance. Unavailable days can be single day numbers or ranges (e.g., "5, 10-12").</p>
+    <p class="text-muted">
+      For each NSF, provide their name, any days they're unavailable and whether they have clearance.
+      Unavailable days can be single day numbers or ranges (e.g., "5, 10-12").
+    </p>
+
     <form action="{{ url_for('nsfs') }}" method="post">
       {% for i in range(1, num_nsf + 1) %}
       <div class="border rounded p-3 mb-3 bg-light">
         <h5 class="mb-2">NSF #{{ i }}</h5>
         {% set existing = existing_roster[i-1] if existing_roster|length >= i else None %}
         <div class="row g-3">
+          <!-- Name -->
           <div class="col-md-4">
             <label class="form-label" for="nsf_name_{{ i }}">Name</label>
             <div class="input-group">
               <span class="input-group-text"><i class="fa-solid fa-id-badge"></i></span>
-              <input type="text" class="form-control" id="nsf_name_{{ i }}" name="nsf_name_{{ i }}" placeholder="Full name"
-                     value="{{ existing.name if existing else '' }}" required>
+              <input
+                type="text"
+                class="form-control"
+                id="nsf_name_{{ i }}"
+                name="nsf_name_{{ i }}"
+                placeholder="Full name"
+                value="{{ existing.name if existing else '' }}"
+                required
+              >
             </div>
           </div>
+
+          <!-- Unavailable days -->
           <div class="col-md-5">
             <label class="form-label" for="nsf_unavail_{{ i }}">Unavailable days (DD or DD-DD)</label>
             <div class="input-group">
               <span class="input-group-text"><i class="fa-solid fa-calendar-xmark"></i></span>
-              <input type="text" class="form-control" id="nsf_unavail_{{ i }}" name="nsf_unavail_{{ i }}"
-                     placeholder="e.g. 5, 10-12"
-                     value="{% if existing %}{{ existing.unavailable | map('split','-') | map('last') | join(',') }}{% endif %}">
+              <input
+                type="text"
+                class="form-control"
+                id="nsf_unavail_{{ i }}"
+                name="nsf_unavail_{{ i }}"
+                placeholder="e.g. 5, 10-12"
+                value="{{ existing.unavail_csv if existing else '' }}"
+              >
             </div>
           </div>
+
+          <!-- Cleared switch -->
           <div class="col-md-3 d-flex align-items-end">
             <div class="form-check form-switch">
-              <input class="form-check-input" type="checkbox" id="nsf_cleared_{{ i }}" name="nsf_cleared_{{ i }}"
-                     {% if existing and existing.cleared %}checked{% endif %}>
+              <input
+                class="form-check-input"
+                type="checkbox"
+                id="nsf_cleared_{{ i }}"
+                name="nsf_cleared_{{ i }}"
+                {% if existing and existing.cleared %}checked{% endif %}
+              >
               <label class="form-check-label" for="nsf_cleared_{{ i }}">Cleared</label>
             </div>
           </div>
@@ -49,21 +76,37 @@
       </div>
       {% endfor %}
 
+      <!-- Team size input -->
       <div class="row mb-3">
         <div class="col-md-4">
           <label class="form-label" for="team_size">NSF team size per Ops day (1-5)</label>
           <div class="input-group">
             <span class="input-group-text"><i class="fa-solid fa-people-group"></i></span>
-            <input type="number" class="form-control" id="team_size" name="team_size" min="1" max="5" value="{{ team_size }}" required>
+            <input
+              type="number"
+              class="form-control"
+              id="team_size"
+              name="team_size"
+              min="1"
+              max="5"
+              value="{{ team_size }}"
+              required
+            >
           </div>
         </div>
       </div>
 
+      <!-- Navigation buttons -->
       <div class="d-flex justify-content-between">
-        <a href="{{ url_for('index') }}" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Back</a>
-        <button type="submit" class="btn btn-success"><i class="fa-solid fa-arrow-right me-1"></i>Next: Leaders</button>
+        <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">
+          <i class="fa-solid fa-arrow-left me-1"></i>Back
+        </a>
+        <button type="submit" class="btn btn-success">
+          <i class="fa-solid fa-arrow-right me-1"></i>Next: Leaders
+        </button>
       </div>
     </form>
   </div>
 </div>
+
 {% endblock %}
