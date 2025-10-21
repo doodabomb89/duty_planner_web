@@ -990,15 +990,6 @@ def step1():
 def nsfs():
     if request.method == "POST":
         num = session.get("num_nsf")
-        if not isinstance(num, int) or num <= 0:
-            flash("Session expired or invalid NSF count. Please start again.")
-            return redirect(url_for("index"))
-        try:
-            start_date = parse_yyyy_mm_dd(session["start_date"])
-            end_date   = parse_yyyy_mm_dd(session["end_date"])
-        except Exception:
-            flash("Session dates missing. Please start again.")
-            return redirect(url_for("index"))
         roster: List[Dict[str, Any]] = []
         start_date = parse_yyyy_mm_dd(session["start_date"])
         end_date   = parse_yyyy_mm_dd(session["end_date"])
@@ -1025,6 +1016,7 @@ def nsfs():
         session["nsf_team_size"] = team_size
         return redirect(url_for("leaders"))
 
+    # 🔹 This is the GET branch — replace yours with this
     num_nsf = session.get("num_nsf")
     if not num_nsf:
         return redirect(url_for("index"))
@@ -1034,6 +1026,7 @@ def nsfs():
         existing_roster=session.get("roster", []),
         team_size=session.get("nsf_team_size", 3),
     )
+
 
 
 @app.route("/leaders", methods=["GET","POST"])
