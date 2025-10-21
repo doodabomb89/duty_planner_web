@@ -27,6 +27,38 @@ from flask import Flask, render_template, request, redirect, url_for, session, f
 def parse_yyyy_mm_dd(s: str) -> date:
     y, m, d = map(int, s.strip().split("-"))
     return date(y, m, d)
+def _compact_days_csv(iso_list: List[str]) -> str:
+    """
+    Turn ISO dates into a compact CSV of DD or DD-DD ranges, sorted ascending.
+    Example: ['2025-10-18','2025-10-19','2025-10-20','2025-10-21','2025-10-25','2025-10-31']
+      -> '18-21,25,31'
+    """
+    days: List[int] = []
+    for iso in iso_list or []:
+        try:
+            parts = iso.split("-")
+            if len(parts) == 3:
+                d = int(parts[2])
+                if 1 <= d <= 31:
+                    days.append(d)
+        except Exception:
+            pass
+    if not days:
+        return ""
+    days = sorted(set(days))
+    ranges: List[str] = []
+    start = prev = days[0]
+    for x in days[1:]:
+        if x == prev + 1:
+            prev = x
+            continue
+        # close previous run
+        ranges.append(f"{start}-{prev}" if start != prev else f"{start}")
+        start = prev = x
+    # close last run
+    ranges.append(f"{start}-{prev}" if start != prev else f"{start}")
+    return ",".join(ranges)
+
 
 def daterange_inclusive(d0: date, d1: date):
     cur = d0
@@ -435,27 +467,61 @@ def plan_ops_assignments(
             bad_diff = stats[p.name]["bad"] - target_bad.get(p.name, 0.0)
             total = stats[p.name]["total"]
 
+            # --- Stronger, urgency-aware NSTT bias to get trainees onto teams ---
             nstt_bias = 0.0
             if nstt_cfg.enabled and p.name in nstt_cfg.members:
                 m = nstt_cfg.members[p.name]
                 start = m.start_date or nstt_cfg.global_start
                 can_start = (start is None) or (d >= start)
+
+                def next_need_inner(nm: str) -> Optional[Tuple[str, str]]:
+                    mm = nstt_cfg.members.get(nm)
+                    if not mm:
+                        return None
+                    for t in ("C2", "E1"):
+                        seq = mm.remaining.get(t, [])
+                        if seq:
+                            return (t, seq[0])
+                    return None
+
+                # rough count of future eligible team days (availability-wise)
+                def future_eligible_ops(nm: str, from_day: date) -> int:
+                    pp = next((x for x in people if x.name == nm), None)
+                    if not pp:
+                        return 0
+                    cnt = 0
+                    for future_d in all_ops:
+                        if future_d <= from_day:
+                            continue
+                        if start and future_d < start:
+                            continue
+                        if future_d in pp.unavailable_ops:
+                            continue
+                        cnt += 1
+                    return cnt
+
                 if can_start:
-                    need = next_need(p.name)
+                    need = next_need_inner(p.name)
                     if need:
-                        stage = need[1]
-                        if stage == "O":
-                            nstt_bias = -1.5
-                        elif stage == "E":
-                            nstt_bias = -1.0
-                        elif stage == "A":
-                            nstt_bias = -0.2
+                        stage = need[1]  # 'O','E','A'
+                        fut = future_eligible_ops(p.name, d)
+                        # stages remaining total
+                        stages_left = sum(len(v) for v in m.remaining.values())
+                        # Base weights: O < A < E (E is the bottleneck)
+                        base = {"O": -0.6, "A": -1.1, "E": -1.4}.get(stage, 0.0)
+                        # Amplify if few future slots or many stages left
+                        fut_amp = 1.5 if fut <= 2 else (1.2 if fut <= 4 else 1.0)
+                        left_amp = 1.3 if stages_left >= 3 else (1.1 if stages_left == 2 else 1.0)
+                        nstt_bias = base * fut_amp * left_amp  # negative pushes earlier in sort
 
             if is_bad:
+                # Bad days: keep core fairness priorities first
                 return (bad_diff, total, nstt_bias, p.name.lower())
             else:
-                over_target = 1 if (stats[p.name]["bad"] > target_bad.get(p.name, 0.0) + 0.0001) else 0
+                # Normal days: prefer those already over bad-target (preserve under-target for Fri/Sat/3-boarding)
+                over_target = 1 if (stats[p.name]["bad"] > target_bad.get(p.name, 0.0) + 1e-4) else 0
                 return (-over_target, total, nstt_bias, p.name.lower())
+
 
         ranked = sorted(avail, key=key)
 
@@ -1025,31 +1091,18 @@ def nsfs():
         session["nsf_team_size"] = team_size
         return redirect(url_for("leaders"))
 
-    # --- GET branch ---
+        # --- NSFs GET branch ---
     num_nsf = session.get("num_nsf")
     if not num_nsf:
         return redirect(url_for("index"))
 
     raw_roster = session.get("roster", [])
-    
-    # Build a simple view-model for the template (strings only)
     existing_roster = []
     for r in raw_roster:
-        name = r.get("name", "")
-        cleared = bool(r.get("cleared", False))
-        iso_list = r.get("unavailable", []) or []
-        days = []
-        for iso in iso_list:
-            try:
-                # Expect 'YYYY-MM-DD' -> take 'DD'
-                parts = iso.split("-")
-                days.append(parts[2] if len(parts) == 3 else "")
-            except Exception:
-                pass
         existing_roster.append({
-            "name": name,
-            "unavail_csv": ",".join([d for d in days if d]),
-            "cleared": cleared,
+            "name": r.get("name", ""),
+            "unavail_csv": _compact_days_csv(r.get("unavailable", [])),
+            "cleared": bool(r.get("cleared", False)),
         })
 
     return render_template(
@@ -1058,6 +1111,8 @@ def nsfs():
         existing_roster=existing_roster,
         team_size=session.get("nsf_team_size", 3),
     )
+
+    
 
 @app.route("/leaders", methods=["GET","POST"])
 def leaders():
@@ -1097,7 +1152,7 @@ def leaders():
         else:
             return redirect(url_for("carry"))
 
-    # ---------- GET branch (safe prefill) ----------
+        # --- Leaders GET branch ---
     num_leaders = session.get("num_leaders")
     if num_leaders is None:
         return redirect(url_for("index"))
@@ -1109,31 +1164,19 @@ def leaders():
         if s == {"TL"}: return "TL"
         if s == {"ATL"}: return "ATL"
         if s == {"C2"}: return "C2"
-        if s == {"C2","ATL"}: return "C2,ATL"
+        if s == {"C2", "ATL"}: return "C2,ATL"
         return ""
 
-    def days_csv(iso_list):
-        out = []
-        for iso in (iso_list or []):
-            try:
-                parts = iso.split("-")
-                if len(parts) == 3:
-                    out.append(parts[2])
-            except Exception:
-                pass
-        return ",".join(out)
-
-    # Build safe view-model for template
     existing_leaders = []
     for r in raw_leaders:
         existing_leaders.append({
-            "name": r.get("name",""),
+            "name": r.get("name", ""),
             "roles_code": roles_to_code(r.get("roles")),
-            "unavail_csv": days_csv(r.get("unavailable")),
+            "unavail_csv": _compact_days_csv(r.get("unavailable", [])),
         })
 
-    existing_three_any = days_csv(session.get("three_boardings_any"))
-    existing_no_any    = days_csv(session.get("no_boardings_any"))
+    existing_three_any = _compact_days_csv(session.get("three_boardings_any", []))
+    existing_no_any = _compact_days_csv(session.get("no_boardings_any", []))
 
     return render_template(
         "leaders.html",
@@ -1142,6 +1185,8 @@ def leaders():
         existing_three_any=existing_three_any,
         existing_no_any=existing_no_any,
     )
+
+    
 
 @app.route("/nstt", methods=["GET","POST"])
 def nstt():
