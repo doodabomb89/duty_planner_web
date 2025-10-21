@@ -1059,23 +1059,10 @@ def nsfs():
         team_size=session.get("nsf_team_size", 3),
     )
 
-
-
-
-
 @app.route("/leaders", methods=["GET","POST"])
 def leaders():
     if request.method == "POST":
         num_leaders = session.get("num_leaders")
-        if not isinstance(num_leaders, int) or num_leaders < 0:
-            flash("Session expired or invalid leader count. Please start again.")
-            return redirect(url_for("index"))
-        try:
-             start_date = parse_yyyy_mm_dd(session["start_date"])
-             end_date   = parse_yyyy_mm_dd(session["end_date"])
-        except Exception:
-            flash("Session dates missing. Please start again.")
-            return redirect(url_for("index"))
         start_date = parse_yyyy_mm_dd(session["start_date"])
         end_date   = parse_yyyy_mm_dd(session["end_date"])
         regs: List[Dict[str, Any]] = []
@@ -1098,7 +1085,6 @@ def leaders():
             })
         session["leaders"] = regs
 
-        # Global boarding markers (asked regardless of NSTT)
         three_any_raw = request.form.get("three_boardings_any", "").strip()
         no_any_raw    = request.form.get("no_boardings_any", "").strip()
         three_dates = _expand_dd_list_into_window_dates(three_any_raw, (start_date, end_date))
@@ -1111,17 +1097,51 @@ def leaders():
         else:
             return redirect(url_for("carry"))
 
+    # ---------- GET branch (safe prefill) ----------
     num_leaders = session.get("num_leaders")
     if num_leaders is None:
         return redirect(url_for("index"))
+
+    raw_leaders = session.get("leaders", [])
+
+    def roles_to_code(roles_list):
+        s = set(roles_list or [])
+        if s == {"TL"}: return "TL"
+        if s == {"ATL"}: return "ATL"
+        if s == {"C2"}: return "C2"
+        if s == {"C2","ATL"}: return "C2,ATL"
+        return ""
+
+    def days_csv(iso_list):
+        out = []
+        for iso in (iso_list or []):
+            try:
+                parts = iso.split("-")
+                if len(parts) == 3:
+                    out.append(parts[2])
+            except Exception:
+                pass
+        return ",".join(out)
+
+    # Build safe view-model for template
+    existing_leaders = []
+    for r in raw_leaders:
+        existing_leaders.append({
+            "name": r.get("name",""),
+            "roles_code": roles_to_code(r.get("roles")),
+            "unavail_csv": days_csv(r.get("unavailable")),
+        })
+
+    existing_three_any = days_csv(session.get("three_boardings_any"))
+    existing_no_any    = days_csv(session.get("no_boardings_any"))
+
     return render_template(
         "leaders.html",
         num_leaders=num_leaders,
-        existing_leaders=session.get("leaders", []),
-        existing_three_any=",".join([d.split("-")[2] for d in session.get("three_boardings_any", [])]) if session.get("three_boardings_any") else "",
-        existing_no_any=",".join([d.split("-")[2] for d in session.get("no_boardings_any", [])]) if session.get("no_boardings_any") else "",
+        existing_leaders=existing_leaders,
+        existing_three_any=existing_three_any,
+        existing_no_any=existing_no_any,
     )
-
 
 @app.route("/nstt", methods=["GET","POST"])
 def nstt():
@@ -1198,7 +1218,46 @@ def nstt():
         session["nstt_cfg"] = nstt_data
         return redirect(url_for("carry"))
 
-    return render_template("nstt.html")
+        # -------- GET branch (safe prefill) --------
+    cfg = session.get("nstt_cfg") or {}
+
+    def days_csv(iso_list):
+        out = []
+        for iso in (iso_list or []):
+            try:
+                parts = iso.split("-")
+                if len(parts) == 3:
+                    out.append(parts[2])
+            except Exception:
+                pass
+        return ",".join(out)
+
+    existing_global_start = cfg.get("global_start") or ""
+    existing_three_boardings = days_csv(cfg.get("three_boardings"))
+    existing_no_boardings    = days_csv(cfg.get("no_boardings"))
+
+    existing_members = []
+    for m in cfg.get("members", []):
+        existing_members.append({
+            "name": m.get("name",""),
+            "types": ",".join(m.get("types", [])),
+            "c2_rem": ",".join(m.get("remaining", {}).get("C2", [])),
+            "e1_rem": ",".join(m.get("remaining", {}).get("E1", [])),
+            "start": m.get("start","") or "",
+        })
+
+    # How many rows to show by default
+    default_rows = max(len(existing_members), 0)
+    return render_template(
+        "nstt.html",
+        existing_global_start=existing_global_start,
+        existing_three_boardings=existing_three_boardings,
+        existing_no_boardings=existing_no_boardings,
+        existing_members=existing_members,
+        default_member_rows=default_rows,
+    )
+
+
 
 @app.route("/carry", methods=["GET","POST"])
 def carry():
