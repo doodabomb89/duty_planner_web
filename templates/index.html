@@ -1,12 +1,12 @@
 {% extends "layout.html" %}
 {% block content %}
 
-<!-- Clean header (no background image, no extra description) -->
+<!-- Clean header -->
 <div class="py-4 text-center">
   <h1 class="display-5 fw-bold text-gradient m-0">Ultimate Ops Planner</h1>
 </div>
 
-<!-- Progress bar under the title -->
+<!-- Progress bar -->
 <div class="mb-4">
   <div class="d-flex justify-content-between mb-1">
     <small class="text-muted">Step 1 of 5</small>
@@ -29,7 +29,7 @@
           <label for="start_date" class="form-label">Start date of month</label>
           <div class="input-group">
             <span class="input-group-text"><i class="fa-solid fa-calendar-day"></i></span>
-            <input type="date" class="form-control" id="start_date" name="start_date" required>
+            <input type="date" class="form-control" id="start_date" name="start_date" value="{{ start_date }}" required>
           </div>
         </div>
 
@@ -37,7 +37,7 @@
           <label for="end_date" class="form-label">End date of month</label>
           <div class="input-group">
             <span class="input-group-text"><i class="fa-solid fa-calendar-day"></i></span>
-            <input type="date" class="form-control" id="end_date" name="end_date" required>
+            <input type="date" class="form-control" id="end_date" name="end_date" value="{{ end_date }}" required>
           </div>
         </div>
 
@@ -45,7 +45,7 @@
           <label for="anchor_date" class="form-label">Known Ops date (anchor)</label>
           <div class="input-group">
             <span class="input-group-text"><i class="fa-solid fa-thumbtack"></i></span>
-            <input type="date" class="form-control" id="anchor_date" name="anchor_date" required>
+            <input type="date" class="form-control" id="anchor_date" name="anchor_date" value="{{ anchor_date }}" required>
           </div>
         </div>
       </div>
@@ -55,7 +55,7 @@
           <label for="num_nsf" class="form-label">Number of NSFs</label>
           <div class="input-group">
             <span class="input-group-text"><i class="fa-solid fa-users"></i></span>
-            <input type="number" class="form-control" id="num_nsf" name="num_nsf" min="1" value="3" required>
+            <input type="number" class="form-control" id="num_nsf" name="num_nsf" min="1" value="{{ num_nsf }}" required>
           </div>
         </div>
 
@@ -63,13 +63,13 @@
           <label for="num_leaders" class="form-label">Number of leaders (TL/ATL/C2)</label>
           <div class="input-group">
             <span class="input-group-text"><i class="fa-solid fa-user-tie"></i></span>
-            <input type="number" class="form-control" id="num_leaders" name="num_leaders" min="0" value="2" required>
+            <input type="number" class="form-control" id="num_leaders" name="num_leaders" min="0" value="{{ num_leaders }}" required>
           </div>
         </div>
 
         <div class="col-md-4 d-flex align-items-end">
           <div class="form-check">
-            <input class="form-check-input" type="checkbox" value="1" id="nstt_enabled" name="nstt_enabled">
+            <input class="form-check-input" type="checkbox" value="1" id="nstt_enabled" name="nstt_enabled" {% if nstt_enabled %}checked{% endif %}>
             <label class="form-check-label" for="nstt_enabled">
               <i class="fa-solid fa-rocket me-1"></i>Enable NSTT for this month
             </label>
