@@ -1029,12 +1029,21 @@ def nsfs():
     num_nsf = session.get("num_nsf")
     if not num_nsf:
         return redirect(url_for("index"))
+    # Convert dicts to objects for easier access in template
+    raw_roster = session.get("roster", [])
+    class Obj:
+        def __init__(self, d):
+            self.__dict__.update(d)
+
+    existing_roster = [Obj(r) for r in raw_roster]
+
     return render_template(
         "nsfs.html",
         num_nsf=num_nsf,
-        existing_roster=session.get("roster", []),
+        existing_roster=existing_roster,
         team_size=session.get("nsf_team_size", 3),
     )
+
 
 
 
