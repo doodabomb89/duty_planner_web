@@ -990,6 +990,15 @@ def step1():
 def nsfs():
     if request.method == "POST":
         num = session.get("num_nsf")
+        if not isinstance(num, int) or num <= 0:
+            flash("Session expired or invalid NSF count. Please start again.")
+            return redirect(url_for("index"))
+        try:
+            start_date = parse_yyyy_mm_dd(session["start_date"])
+            end_date   = parse_yyyy_mm_dd(session["end_date"])
+        except Exception:
+            flash("Session dates missing. Please start again.")
+            return redirect(url_for("index"))
         roster: List[Dict[str, Any]] = []
         start_date = parse_yyyy_mm_dd(session["start_date"])
         end_date   = parse_yyyy_mm_dd(session["end_date"])
@@ -1033,6 +1042,15 @@ def nsfs():
 def leaders():
     if request.method == "POST":
         num_leaders = session.get("num_leaders")
+        if not isinstance(num_leaders, int) or num_leaders < 0:
+            flash("Session expired or invalid leader count. Please start again.")
+            return redirect(url_for("index"))
+        try:
+             start_date = parse_yyyy_mm_dd(session["start_date"])
+             end_date   = parse_yyyy_mm_dd(session["end_date"])
+        except Exception:
+            flash("Session dates missing. Please start again.")
+            return redirect(url_for("index"))
         start_date = parse_yyyy_mm_dd(session["start_date"])
         end_date   = parse_yyyy_mm_dd(session["end_date"])
         regs: List[Dict[str, Any]] = []
@@ -1076,7 +1094,7 @@ def leaders():
         num_leaders=num_leaders,
         existing_leaders=session.get("leaders", []),
         existing_three_any=",".join([d.split("-")[2] for d in session.get("three_boardings_any", [])]) if session.get("three_boardings_any") else "",
-        xisting_no_any=",".join([d.split("-")[2] for d in session.get("no_boardings_any", [])]) if session.get("no_boardings_any") else "",
+        existing_no_any=",".join([d.split("-")[2] for d in session.get("no_boardings_any", [])]) if session.get("no_boardings_any") else "",
     )
 
 
