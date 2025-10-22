@@ -427,6 +427,7 @@ def rebalance_leader_bad_days(
     return leaders_by_day
 
 # ========= NSF planning (improved fairness; no OIL penalty; no D+1 exclusion) =========
+
 def plan_ops_assignments(
     all_ops: List[date],
     bad_ops: Set[date],
@@ -435,8 +436,21 @@ def plan_ops_assignments(
     target_bad: Dict[str, float],
     nstt_cfg: NSTTConfig,
 ) -> Tuple[Dict[date, List[str]], Dict[str, Dict[str, int]], Dict[date, Dict[str, str]]]:
+    """
+    Builds NSF team assignments and (when enabled) assigns NSTT stages per boarding.
 
-    # Always 5 when NSTT is enabled
+    Key NSTT rules implemented:
+      • Ops team becomes 5-man when NSTT is enabled.
+      • ≤ 2 trainees per Ops day.
+      • Sundays = 1 boarding, weekdays = 2 boardings, optional 3-boarding markers, and 0-boarding markers.
+      • Per boarding: at most ONE non-observer (E or A).
+      • Both trainees may Observe (O) in the same boarding.
+      • Same-day chaining is allowed: O→E (same day), or E→A (same day). Never O→E→A in a single day.
+      • C2 must clear before E1 (track priority).
+      • Urgency priority: fewer future eligible Ops → more remaining stages → next stage (E > A > O).
+      • Fairness-first team picking with an urgency nudge (stats/targets drive later balancing).
+    """
+    # Always 5-man teams when NSTT is on
     if nstt_cfg.enabled:
         team_size = 5
 
@@ -446,20 +460,18 @@ def plan_ops_assignments(
 
     by_name = {p.name: p for p in people}
 
-    # mutable copy of per-person remaining NSTT stages (so tags "stick")
+    # Mutable copy of per-person remaining NSTT sequences (C2 first, then E1)
     remaining: Dict[str, Dict[str, List[str]]] = {}
     starts: Dict[str, Optional[date]] = {}
     if nstt_cfg.enabled:
         for nm, m in nstt_cfg.members.items():
-            # C2 must be cleared before E1: keep order C2 then E1 in every helper
             remaining[nm] = {
                 "C2": list(m.remaining.get("C2", [])),
                 "E1": list(m.remaining.get("E1", [])),
             }
             starts[nm] = (m.start_date or nstt_cfg.global_start)
 
-    # ---- helpers ------------------------------------------------------------
-
+    # --- helpers -------------------------------------------------------------
     def boardings_on(d: date) -> int:
         if not nstt_cfg.enabled:
             return 0
@@ -467,7 +479,7 @@ def plan_ops_assignments(
             return 0
         if d in nstt_cfg.three_boarding_ops:
             return 3
-        return 1 if d.weekday() == 6 else 2  # Sun=1, others=2
+        return 1 if d.weekday() == 6 else 2  # Sun=6 in Python: 0=Mon ... 6=Sun
 
     def stages_left(nm: str) -> int:
         if nm not in remaining:
@@ -475,7 +487,7 @@ def plan_ops_assignments(
         return len(remaining[nm].get("C2", [])) + len(remaining[nm].get("E1", []))
 
     def next_stage(nm: str) -> Optional[Tuple[str, str]]:
-        """Return the next (track, stage) following 'C2 then E1' priority."""
+        """Strict 'C2 then E1' track priority; returns (track, 'O'/'E'/'A') or None."""
         if nm not in remaining:
             return None
         for track in ("C2", "E1"):
@@ -485,9 +497,11 @@ def plan_ops_assignments(
         return None
 
     def future_eligible_ops(nm: str, after_day: date) -> int:
-        """Count future calendar Ops where nm could potentially train (availability + start)."""
+        """Count future Ops days where nm could still train (start date reached, not Ops-constrained)."""
+        if nm not in remaining:
+            return 0
         p = by_name.get(nm)
-        if not p or not nstt_cfg.enabled:
+        if not p:
             return 0
         st = starts.get(nm)
         cnt = 0
@@ -502,7 +516,7 @@ def plan_ops_assignments(
         return cnt
 
     def can_train_today(nm: str, d: date) -> bool:
-        """Member is on the team day, past start, not constrained, and still has stages."""
+        """True if nm is an NSTT member with stages left, past start, and not Ops-constrained on d."""
         if nm not in remaining:
             return False
         p = by_name.get(nm)
@@ -515,12 +529,11 @@ def plan_ops_assignments(
             return False
         return stages_left(nm) > 0
 
-    # ---- main daily loop ----------------------------------------------------
-
+    # --- main daily loop -----------------------------------------------------
     for d in sorted(all_ops):
         is_bad = d in bad_ops
 
-        # = Team selection (fairness first, with urgency-aware tie-break) =
+        # ===== Team selection (fairness-first with urgency nudge) =====
         avail = [p for p in people if d not in p.unavailable_ops]
         if not avail:
             schedule[d] = []
@@ -530,162 +543,158 @@ def plan_ops_assignments(
             bad_diff = stats[p.name]["bad"] - target_bad.get(p.name, 0.0)
             total = stats[p.name]["total"]
 
-            # urgency bias to *include* trainees who need NSTT
-            n_bias = 0.0
+            # Urgency nudge if this person needs NSTT and can legally train from today onward
+            nudge = 0.0
             if nstt_cfg.enabled and p.name in remaining and stages_left(p.name) > 0:
                 st = starts.get(p.name)
                 if (st is None) or (d >= st):
                     fut = future_eligible_ops(p.name, d)
                     trk_stg = next_stage(p.name)
                     stage = trk_stg[1] if trk_stg else None
-                    # prefer E/A over O (waiting for action), and fewer future days
-                    base = {"E": -1.6, "A": -1.2, "O": -0.6}.get(stage, 0.0)
-                    fut_amp = 1.6 if fut <= 2 else (1.3 if fut <= 4 else 1.0)
+                    # prefer action stages, but still give O a small pull so we can chain O→E
+                    base = {"E": -1.6, "A": -1.3, "O": -0.9}.get(stage, 0.0)
+                    fut_amp = 1.7 if fut <= 2 else (1.4 if fut <= 4 else 1.0)
                     left = stages_left(p.name)
-                    left_amp = 1.3 if left >= 3 else (1.1 if left == 2 else 1.0)
-                    n_bias = base * fut_amp * left_amp
+                    left_amp = 1.35 if left >= 3 else (1.15 if left == 2 else 1.0)
+                    nudge = base * fut_amp * left_amp
 
             if is_bad:
-                return (bad_diff, total, n_bias, p.name.lower())
+                return (bad_diff, total, nudge, p.name.lower())
             else:
                 over = 1 if (stats[p.name]["bad"] > target_bad.get(p.name, 0.0) + 1e-4) else 0
-                return (-over, total, n_bias, p.name.lower())
+                return (-over, total, nudge, p.name.lower())
 
         ranked = sorted(avail, key=team_key)
 
         team: List[Person] = []
         noncleared = 0
         for cand in ranked:
-            if not cand.cleared:
-                if noncleared >= 1:
-                    continue
-                noncleared += 1
+            if not cand.cleared and noncleared >= 1:
+                continue
             team.append(cand)
+            if not cand.cleared:
+                noncleared += 1
             if len(team) == team_size:
                 break
 
-        # ensure not all are non-cleared
-        if noncleared == 1 and not any(t.cleared for t in team):
+        # fallback: ensure at least one cleared member is on the team
+        if team and all(not t.cleared for t in team):
             extra = next((p for p in ranked if p.cleared and p not in team), None)
             if extra:
-                for i in range(len(team) - 1, -1, -1):
-                    if not team[i].cleared:
-                        team[i] = extra
-                        break
+                team[-1] = extra
 
         schedule[d] = [p.name for p in team]
 
-        # update fairness stats
+        # fairness stats tick
         for p in team:
             stats[p.name]["total"] += 1
             if is_bad:
                 stats[p.name]["bad"] += 1
 
-        # = NSTT tagging (single pass; no replan) =
+        # ===== NSTT tagging per day (single pass) =====
         if not nstt_cfg.enabled:
             continue
 
         nb = boardings_on(d)
         if nb <= 0:
-            continue  # normal ops day, no NSTT tags
+            continue  # normal Ops day with no boardings → no NSTT tags
 
-        # eligible trainees on this team
         team_names = schedule[d]
         eligible = [nm for nm in team_names if can_train_today(nm, d)]
         if not eligible:
             continue
 
-        # urgency for choosing at most 2 distinct trainees today
-        def urgency(nm: str):
-            fut = future_eligible_ops(nm, d)              # fewer future slots -> higher priority
-            left = stages_left(nm)                         # more stages left -> higher priority
+        # Choose up to 2 trainees, most urgent first
+        def urgency_key(nm: str):
+            fut = future_eligible_ops(nm, d)
+            left = stages_left(nm)
             nxt = next_stage(nm)
-            # people waiting for E/A (action) ahead of those still on O
+            # prefer E (0) over A (1) over O (2) for "next stage"
             stage_rank = {"E": 0, "A": 1, "O": 2}
             sr = stage_rank.get(nxt[1], 3) if nxt else 3
             return (fut, -left, sr, nm.lower())
 
-        eligible.sort(key=urgency)
-        chosen = eligible[:2]  # ≤ 2 trainees per day
+        eligible.sort(key=urgency_key)
+        chosen = eligible[:2]
         if not chosen:
             continue
 
-        # Track what each chosen does today to enforce "O not same day as E/A"
+        # Track per-day progress to prevent O+E+A in one day
         did_today: Dict[str, List[str]] = {nm: [] for nm in chosen}
         day_tags: Dict[str, List[str]] = {nm: [] for nm in chosen}
 
-        def pop_exact(nm: str, desired: str) -> bool:
-            """Pop only if the EXACT next stage equals 'desired' on the required track order (C2 then E1)."""
+        def pop_if_exact(nm: str, exact_stage: str) -> bool:
+            """Advance exactly the trainee's next stage (C2 before E1)."""
             nxt = next_stage(nm)
             if not nxt:
                 return False
             track, stg = nxt
-            if stg != desired:
+            if stg != exact_stage:
                 return False
             remaining[nm][track].pop(0)
-            did_today[nm].append(desired)
-            day_tags[nm].append(desired)
+            did_today[nm].append(exact_stage)
+            day_tags[nm].append(exact_stage)
             return True
 
-        # constraint: O must be a different calendar day than E/A
-        def eligible_for_nonobserver(nm: str) -> bool:
-            """
-            A trainee can take a non-observer slot (E or A) this boarding if their
-            next stage is E or A. It's OK if they already did O earlier today.
-            Only one non-observer per boarding is enforced elsewhere.
-            """
+        def can_take_nonobserver(nm: str) -> bool:
+            """A trainee can take E or A now if that is their immediate next stage and they haven't already done 2 stages today."""
+            if len(did_today[nm]) >= 2:
+                return False
             nxt = next_stage(nm)
-            if not nxt:
+            return bool(nxt and nxt[1] in ("E", "A"))
+
+        def can_observe(nm: str) -> bool:
+            """A trainee can Observe if 'O' is exactly next, and they've done <2 stages today."""
+            if len(did_today[nm]) >= 2:
                 return False
-            stg = nxt[1]
-            return stg in ("E", "A")
-
-
-        def eligible_for_observer(nm: str) -> bool:
-            # can do O only if it's truly next and we haven't already done E/A today
             nxt = next_stage(nm)
-            if not nxt:
-                return False
-            stg = nxt[1]
-            if stg != "O":
-                return False
-            # Allow O even if the other trainee is doing E/A in the same boarding
-            return "E" not in did_today[nm] and "A" not in did_today[nm]
+            return bool(nxt and nxt[1] == "O")
 
-        # Iterate boardings and assign stages
+        # Boarding-by-boarding assignment
         for _b in range(nb):
             placed_nonobs = False
 
-            # 1) Place one non-observer (E or A) this boarding, prefer the most urgent among chosen
+            # --- 1) Non-observer slot (E/A) — at most one per boarding ---
+            # Prefer chaining within the day: A if someone already did E earlier; else E (ideally after O)
+            # Candidate list ordered: (A-ready with prior E today) → (E-ready who already did O today) → (any E-ready) → (any A-ready)
+            # Build pools
+            a_after_e = [nm for nm in chosen if can_take_nonobserver(nm) and next_stage(nm)[1] == "A" and ("E" in did_today[nm])]
+            e_after_o = [nm for nm in chosen if can_take_nonobserver(nm) and next_stage(nm)[1] == "E" and ("O" in did_today[nm])]
+            e_plain   = [nm for nm in chosen if can_take_nonobserver(nm) and next_stage(nm)[1] == "E" and ("O" not in did_today[nm])]
+            a_plain   = [nm for nm in chosen if can_take_nonobserver(nm) and next_stage(nm)[1] == "A" and ("E" not in did_today[nm])]
+
+            picked_nm = None
+            for pool in (a_after_e, e_after_o, e_plain, a_plain):
+                if pool:
+                    # within a pool, prefer the more urgent trainee
+                    pool.sort(key=urgency_key)
+                    picked_nm = pool[0]
+                    break
+
+            if picked_nm:
+                pop_if_exact(picked_nm, next_stage(picked_nm)[1])
+                placed_nonobs = True
+
+            # --- 2) Observers — both trainees may Observe this boarding if it's exactly next ---
             for nm in chosen:
-                if eligible_for_nonobserver(nm):
-                    # E before A naturally via next_stage order
-                    if pop_exact(nm, next_stage(nm)[1]):
-                        placed_nonobs = True
-                        break
+                if can_observe(nm):
+                    # Permit observing even if another trainee just used the non-observer slot
+                    # (still ≤1 E/A this boarding).
+                    # Also allow observe→execute chaining later in the same day.
+                    pop_if_exact(nm, "O")
 
-            # 2) Place observers (O) possibly for BOTH chosen (piggyback allowed)
+            # Safety: ensure no one exceeds 2 stages in the day
             for nm in chosen:
-                if eligible_for_observer(nm):
-                    pop_exact(nm, "O")
+                if len(did_today[nm]) > 2:
+                    # This should never happen by construction; guard anyway.
+                    did_today[nm] = did_today[nm][:2]
 
-            # 3) If no non-observer placed yet, try once more (rare)
-            if not placed_nonobs:
-                for nm in chosen:
-                    if eligible_for_nonobserver(nm):
-                        pop_exact(nm, next_stage(nm)[1])
-                        break
-
-            # Note: because we prohibit O and E/A on the same day for a person,
-            # someone who did O now will NOT be considered for E/A later today.
-
-        # Finalize string tags: "O&E", "E&A", "O", ...
+        # Finalize tags: map to "O", "E", "A", "O&E", "E&A"
         tags = {nm: "&".join(v) for nm, v in day_tags.items() if v}
         if tags:
             nstt_day_roles[d] = tags
 
     return schedule, stats, nstt_day_roles
-
 
 
 def replan_nstt_tags(
@@ -695,10 +704,11 @@ def replan_nstt_tags(
     nstt_cfg: NSTTConfig,
 ) -> Dict[date, Dict[str, str]]:
     """
-    Deprecated: NSTT tagging is finalized in plan_ops_assignments.
-    Kept only for compatibility; returns an empty dict.
+    Deprecated: NSTT tagging is finalized during plan_ops_assignments in a single pass.
+    Keeping this as a no-op for backward compatibility with templates.
     """
     return {}
+
 
 
 
