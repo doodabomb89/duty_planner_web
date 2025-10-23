@@ -51,9 +51,9 @@
                 <td>
                   {% set day = r[0] %}
                   {% if '*' in day %}
-                    <span class="badge rounded-pill text-bg-warning">{{ day|replace('*','') }}</span>
+                    <span class="badge rounded-pill text-bg-warning" style="color: black;">{{ day|replace('*','') }}</span>
                   {% else %}
-                    <span class="badge rounded-pill text-bg-light">{{ day }}</span>
+                    <span class="badge rounded-pill text-bg-light" style="color: black;" >{{ day }}</span>
                   {% endif %}
                 </td>
                 <td>{{ r[1] or "—" }}</td>
