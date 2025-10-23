@@ -15,8 +15,8 @@
   <div class="card-body">
     <h2 class="card-title mb-3"><i class="fa-solid fa-rocket me-1"></i> NSTT Configuration</h2>
     <p class="text-muted">
-      If NSTT (Non-standard training tasks) is enabled this month, specify when training can begin,
-      special Ops days, and who still needs to complete stages.
+      Input the date NSTT can begin as 'Global NSTT start date', if not it is assumed NSTT can start from the first Ops date.
+      
     </p>
 
     <form action="{{ url_for('nstt') }}" method="post" id="nsttForm">
@@ -71,7 +71,7 @@
 
       <!-- Count -->
       <div class="mb-3">
-        <label for="nstt_num_members" class="form-label">How many participants need NSTT this month?</label>
+        <label for="nstt_num_members" class="form-label">How many operators need to clear their NSTT this month?</label>
         <div class="input-group">
           <span class="input-group-text"><i class="fa-solid fa-users"></i></span>
           <input
